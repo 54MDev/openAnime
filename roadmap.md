@@ -1,0 +1,82 @@
+# Roadmap
+
+## Overview
+
+Five milestones, each independently testable before moving to the next. Never move to the next milestone until the current one is verified working.
+
+---
+
+## Milestone 1 — IR Input Pipeline
+**Goal:** Press a button on the remote → see the correct string printed in a terminal on the Linux side.
+
+- [ ] Wire KY-022 to STM32 GPIO
+- [ ] Upload IR detection sketch; verify raw hex codes print over serial
+- [ ] Map D-pad + OK + Back hex codes; hardcode into firmware
+- [ ] Upload final firmware; verify `UP`, `DOWN`, `LEFT`, `RIGHT`, `OK`, `BACK` print on Linux serial monitor
+
+**Done when:** `python3 -c "import serial; s=serial.Serial('/dev/ttyXXX',9600); print(s.readline())"` prints the correct command string every time a button is pressed.
+
+---
+
+## Milestone 2 — Backend Bridge
+**Goal:** IR command from remote → WebSocket message received in a browser tab.
+
+- [ ] Write `app.py` with asyncio serial reader + WebSocket server on port 8765
+- [ ] Write a minimal test HTML page that connects to ws://localhost:8765 and logs messages
+- [ ] Open test page in Chromium; verify button presses appear in browser console
+
+**Done when:** Every remote button press produces a logged WebSocket message in the browser with zero dropped inputs.
+
+---
+
+## Milestone 3 — UI Shell
+**Goal:** A fullscreen, mouse-free anime browse UI that responds to D-pad navigation.
+
+- [ ] Build `frontend/index.html` layout: hero banner + card rows
+- [ ] Write `frontend/style.css`: 10-foot sizing, focus ring animation, card hover scale
+- [ ] Write `frontend/app.js`: WebSocket listener, 2D focus index grid, keyboard fallback
+- [ ] Test navigation across all card rows with the remote
+- [ ] Wire card selection (`OK`) to fire a placeholder `POST /play` request to the backend
+
+**Done when:** All cards are navigable via remote with smooth focus transitions; selecting a card triggers the backend endpoint.
+
+---
+
+## Milestone 4 — Stream Extraction & Playback
+**Goal:** Select an anime episode → video plays fullscreen via mpv with audio.
+
+- [ ] Write `backend/scraper.py` as a thin `yt-dlp` subprocess wrapper
+- [ ] Test yt-dlp against animepahe, anikoto, and reanime manually from the terminal
+- [ ] Wire `/play` endpoint to call scraper and launch `mpv --fullscreen --ontop`
+- [ ] Verify Chromium suspends cleanly while mpv plays
+- [ ] Verify mpv exit returns focus to the browser UI
+- [ ] Confirm audio plays through USB audio adapter (ALSA device)
+
+**Done when:** End-to-end flow works: browse → select episode → video plays with audio → exit returns to UI.
+
+---
+
+## Milestone 5 — Appliance Polish
+**Goal:** The device boots directly into the UI with no manual intervention; feels like a consumer product.
+
+- [ ] Write systemd service for `app.py` (auto-start, auto-restart on crash)
+- [ ] Write autostart entry for Openbox to launch Chromium kiosk on boot
+- [ ] Configure Debian to boot to X11 + Openbox without login prompt (autologin)
+- [ ] Hide cursor (`unclutter` package)
+- [ ] Test cold boot → UI ready time; target under 30 seconds
+- [ ] Disable screen blanking / DPMS
+- [ ] Add BACK button handler to close mpv and return to UI
+
+**Done when:** Power on the Uno Q → TV shows the UI within 30 seconds, no keyboard or mouse ever touched.
+
+---
+
+## Stretch Goals (Post-MVP)
+
+| Goal | Notes |
+|------|-------|
+| Search functionality | Add a search bar triggered by a long-press of OK; requires an on-screen keyboard or phone-based text input |
+| Continue watching | Track episode progress in a local SQLite file |
+| Multiple sources | Add fallback: if yt-dlp fails on one site, retry on the next |
+| Watchlist | Persist a favorites list in a local JSON file |
+| OTA updates | `git pull && systemctl restart openanime` triggered from a remote button combo |
