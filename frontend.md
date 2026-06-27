@@ -101,6 +101,60 @@ required.
 - Possible later enhancement: phone-based text entry over the existing
   WebSocket (faster typing) — not in scope now, on-screen keyboard is primary.
 
+**ON HOLD — search relevance (do not build yet):** current search returns
+poor/irrelevant matches (e.g. typing "KONOSUBA" surfaces unrelated shows). We
+want results ranked by **how closely the title matches the typed keyword**, so
+the obvious name match is at/near the top. To investigate when we build:
+- The AniList query already passes `sort: SEARCH_MATCH`; confirm whether the
+  noise comes from live-as-you-type firing on 2–3 char fragments (intermediate
+  junk) vs. AniList's ranking itself.
+- Options: only show results once the query is longer / on submit; client-side
+  re-rank by string similarity between the query and english/romaji titles;
+  prefer exact/prefix matches; drop very-low-relevance entries.
+- Decide which title field to match against (english vs. romaji vs. synonyms).
+
+---
+
+## 4. Currently airing anime (new-episode tracking) — ON HOLD, not built yet
+
+**Why this matters:** fast, accurate currently-airing support is a flagship
+feature. The biggest weakness of commercial OTT providers is that their
+currently-airing metadata updates too slowly. We avoid that entirely.
+
+This breaks into two problems, and **both are essentially already solved**:
+
+**(a) Knowing what aired and when — solved by the AniList API.** AniList's
+airing data updates within minutes of broadcast (community/automation-driven),
+faster and more accurate than typical OTT metadata. Everything we need is in the
+API, no extra infrastructure and no caching (fits the online-only design):
+- `AiringSchedule`: per-episode `airingAt` (UTC unix timestamp), `episode`
+  number, `timeUntilAiring`.
+- `Media.nextAiringEpisode`: next episode number + when it airs.
+- `Media.status: RELEASING` to filter for currently-airing shows.
+
+Planned UI use:
+- A top **"Airing Now / New This Week"** row, from `status_in: [RELEASING]`
+  (or the airing-schedule endpoint windowed to the last/next 7 days).
+- On the episode-list screen (section 2): derive the latest aired episode from
+  `nextAiringEpisode.episode - 1`, gray out not-yet-aired episodes, and show a
+  live "airs in 2d 4h" countdown on the next one.
+- Periodic re-fetch to stay current; no local cache.
+
+**(b) Actually finding the new episode's stream — solved by fast fan sources.**
+This lives in M4 (the scraper), not the UI. The source sites (animepahe/anikoto/
+reanime) post new **subbed** episodes roughly **30 min – 1 hr after official
+release** — fast enough that "new episode → playable" feels immediate. To make
+this reliable, **multi-source fallback** (currently a stretch goal) should be a
+first-class M4 requirement: if site A doesn't have episode N yet, retry B/C.
+
+**Open questions to settle when building (deferred):**
+- Subs-only for the airing path (fast), or also surface dubs (lag weeks)?
+- "Airing Now" as a row on the home grid, or its own dedicated screen/tab?
+- Per-show "following" (newest episode of followed shows floats to top) vs. a
+  flat schedule-driven row for everyone.
+- Timezone handling: `airingAt` is UTC unix — convert to device local time for
+  countdowns.
+
 ---
 
 ## Build order (suggested, to confirm later)

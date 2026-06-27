@@ -49,6 +49,11 @@ const els = {
 // "home" | "detail" | "keyboard"
 let screen = "home";
 
+// The original catalog, so BACK can restore it after a search replaces the
+// home rows with results. `showingResults` tracks whether results are up.
+let homeCatalog = null;
+let showingResults = false;
+
 // =====================================================================
 // Home focus state
 //   grid[rowIndex] = array of card elements; focus is a (row, col) cursor.
@@ -541,7 +546,14 @@ async function runSearch({ keepKeyboard = false } = {}) {
     console.error("AniList search failed:", err);
     render([{ title: `Results for “${term}”`, media: [] }]);
   }
+  showingResults = true;
   if (!keepKeyboard) closeKeyboard();
+}
+
+// Drop the search results and restore the original home catalog.
+function restoreHome() {
+  showingResults = false;
+  render(homeCatalog || fallbackCatalog());
 }
 
 // =====================================================================
@@ -599,7 +611,13 @@ function handleCommand(cmd) {
       else if (cmd === "LEFT")  homeMove(0, -1);
       else if (cmd === "RIGHT") homeMove(0, 1);
       else if (cmd === "OK")    homeSelect();
-      // BACK on home does nothing (already at root).
+      else if (cmd === "BACK") {
+        // BACK: restore the catalog if we're viewing search results; otherwise
+        // drop from the search bar back down into the rows. At the catalog
+        // root with a row focused, BACK is a no-op.
+        if (showingResults) restoreHome();
+        else if (focusRow === SEARCH_ROW) homeMove(1, 0);
+      }
       break;
 
     case "detail":
@@ -667,9 +685,10 @@ function connectWS() {
 (async function init() {
   connectWS();
   try {
-    render(await fetchCatalog());
+    homeCatalog = await fetchCatalog();
   } catch (err) {
     console.error("AniList fetch failed, using fallback:", err);
-    render(fallbackCatalog());
+    homeCatalog = fallbackCatalog();
   }
+  render(homeCatalog);
 })();
