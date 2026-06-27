@@ -2,14 +2,19 @@
  *
  * Responsibilities:
  *   1. Pull real anime catalog + art from the AniList GraphQL API (live).
- *   2. Render a hero banner + horizontal card rows.
- *   3. Drive a 2D focus grid from IR commands arriving over WebSocket
+ *   2. Render a hero banner + horizontal card rows + a persistent search bar.
+ *   3. Drive navigation from IR commands arriving over WebSocket
  *      (and from the keyboard, as a dev fallback).
- *   4. On OK, fire a placeholder POST /play to the backend.
+ *   4. Open a Netflix-style episode-list detail screen on OK.
+ *   5. Provide an on-screen d-pad keyboard for search.
+ *   6. On play, fire a placeholder POST /play to the backend.
  *
  * The device is online-only by design, so AniList is the source of truth;
  * there is no local cache. A tiny inline fallback exists only so the screen
  * isn't blank if the AniList request itself fails.
+ *
+ * Navigation is a small screen state machine: each screen owns how it handles
+ * the six remote commands (UP/DOWN/LEFT/RIGHT/OK/BACK).
  */
 
 const WS_URL = `ws://${location.hostname || "localhost"}:8765`;
@@ -19,17 +24,37 @@ const ANILIST_URL = "https://graphql.anilist.co";
 // ---- DOM handles ----
 const els = {
   conn: document.getElementById("conn"),
+  home: document.getElementById("home"),
   rows: document.getElementById("rows"),
+  searchbar: document.getElementById("searchbar"),
+  searchLabel: document.getElementById("search-label"),
   heroArt: document.getElementById("hero-art"),
   heroTitle: document.getElementById("hero-title"),
   heroSub: document.getElementById("hero-sub"),
   heroDesc: document.getElementById("hero-desc"),
   overlay: document.getElementById("overlay"),
   overlayText: document.getElementById("overlay-text"),
+  detail: document.getElementById("detail"),
+  detailArt: document.getElementById("detail-art"),
+  detailTitle: document.getElementById("detail-title"),
+  detailSub: document.getElementById("detail-sub"),
+  detailDesc: document.getElementById("detail-desc"),
+  episodes: document.getElementById("episodes"),
+  keyboard: document.getElementById("keyboard"),
+  kbQuery: document.getElementById("kb-query"),
+  kbGrid: document.getElementById("kb-grid"),
 };
 
-// ---- Focus state ----
-// grid[rowIndex] = array of card elements; focus is a (row, col) cursor.
+// ---- Screen state ----
+// "home" | "detail" | "keyboard"
+let screen = "home";
+
+// =====================================================================
+// Home focus state
+//   grid[rowIndex] = array of card elements; focus is a (row, col) cursor.
+//   focusRow === SEARCH_ROW (-1) means the search bar is focused.
+// =====================================================================
+const SEARCH_ROW = -1;
 let grid = [];
 let focusRow = 0;
 let focusCol = 0;
@@ -71,23 +96,39 @@ async function fetchCatalog() {
       }
     }`;
 
-  const res = await fetch(ANILIST_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({
-      query,
-      variables: { season: currentSeason(), year: new Date().getFullYear() },
-    }),
+  const data = await anilist(query, {
+    season: currentSeason(),
+    year: new Date().getFullYear(),
   });
-  if (!res.ok) throw new Error(`AniList HTTP ${res.status}`);
-  const { data, errors } = await res.json();
-  if (errors) throw new Error(errors.map((e) => e.message).join("; "));
 
   return [
     { title: "Trending Now", media: data.trending.media },
     { title: `Popular This Season`, media: data.season.media },
     { title: "All-Time Popular", media: data.popular.media },
   ];
+}
+
+async function searchAnime(term) {
+  const query = `
+    query ($search: String) {
+      Page(perPage: 24) {
+        media(search: $search, type: ANIME, sort: SEARCH_MATCH) { ${MEDIA_FIELDS} }
+      }
+    }`;
+  const data = await anilist(query, { search: term });
+  return data.Page.media;
+}
+
+async function anilist(query, variables) {
+  const res = await fetch(ANILIST_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ query, variables }),
+  });
+  if (!res.ok) throw new Error(`AniList HTTP ${res.status}`);
+  const { data, errors } = await res.json();
+  if (errors) throw new Error(errors.map((e) => e.message).join("; "));
+  return data;
 }
 
 // Minimal fallback so navigation is still demoable if AniList is unreachable.
@@ -110,7 +151,7 @@ function fallbackCatalog() {
 }
 
 // =====================================================================
-// Rendering
+// Rendering — home rows
 // =====================================================================
 
 function titleOf(media) {
@@ -122,8 +163,6 @@ function makeCard(media, rowIndex, colIndex) {
   card.className = "card";
   card.dataset.row = rowIndex;
   card.dataset.col = colIndex;
-  // Placeholder play target until M4 wires real stream extraction.
-  card.dataset.url = `placeholder://anilist/${media.id}`;
   card.dataset.id = media.id;
 
   const art = document.createElement("div");
@@ -151,7 +190,7 @@ function makeCard(media, rowIndex, colIndex) {
     card.append(badge);
   }
 
-  card._media = media; // stash for hero updates
+  card._media = media; // stash for hero updates / detail screen
   return card;
 }
 
@@ -159,7 +198,7 @@ function render(catalog) {
   els.rows.innerHTML = "";
   grid = [];
 
-  catalog.forEach((row, rowIndex) => {
+  catalog.forEach((row) => {
     if (!row.media || !row.media.length) return;
 
     const section = document.createElement("section");
@@ -184,13 +223,13 @@ function render(catalog) {
     grid.push(rowCards);
   });
 
-  focusRow = 0;
+  focusRow = grid.length ? 0 : SEARCH_ROW;
   focusCol = 0;
-  if (grid.length) applyFocus();
+  applyFocus();
 }
 
 // =====================================================================
-// Focus / navigation
+// Home focus / navigation
 // =====================================================================
 
 function clamp(v, max) {
@@ -198,10 +237,17 @@ function clamp(v, max) {
 }
 
 function applyFocus() {
+  document.querySelectorAll(".card.focused").forEach((c) => c.classList.remove("focused"));
+  els.searchbar.classList.remove("focused");
+
+  if (focusRow === SEARCH_ROW) {
+    els.searchbar.classList.add("focused");
+    scrollToTop();
+    return;
+  }
+
   const card = grid[focusRow]?.[focusCol];
   if (!card) return;
-
-  document.querySelectorAll(".card.focused").forEach((c) => c.classList.remove("focused"));
   card.classList.add("focused");
 
   // Slide the row's track so the focused card is pinned to the left content edge.
@@ -210,7 +256,25 @@ function applyFocus() {
   const offset = Math.min(0, -(card.offsetLeft - basePad));
   track.style.transform = `translateX(${offset}px)`;
 
+  centerRowInView(card.closest(".row"));
   updateHero(card._media);
+}
+
+// ---- Camera follow (section 1): keep the focused row vertically centered. ----
+function centerRowInView(rowEl) {
+  if (!rowEl) return;
+  const rect = rowEl.getBoundingClientRect();
+  const rowCenter = window.scrollY + rect.top + rect.height / 2;
+  // Clamp so the page never scrolls past its natural top/bottom.
+  const target = clamp(
+    rowCenter - window.innerHeight / 2,
+    document.documentElement.scrollHeight - window.innerHeight
+  );
+  window.scrollTo({ top: target, behavior: "smooth" });
+}
+
+function scrollToTop() {
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function updateHero(media) {
@@ -232,57 +296,271 @@ function updateHero(media) {
   els.heroDesc.textContent = (media.description || "").replace(/<[^>]*>/g, " ").trim();
 }
 
-function move(dRow, dCol) {
-  if (!grid.length) return;
-  if (dRow) {
-    focusRow = clamp(focusRow + dRow, grid.length - 1);
-    focusCol = clamp(focusCol, grid[focusRow].length - 1);
+function homeMove(dRow, dCol) {
+  // Vertical movement, including hopping to/from the search bar.
+  if (dRow < 0) {
+    if (focusRow === 0 || focusRow === SEARCH_ROW) {
+      focusRow = SEARCH_ROW; // UP from the first row → search bar
+    } else {
+      focusRow = clamp(focusRow + dRow, grid.length - 1);
+      focusCol = clamp(focusCol, grid[focusRow].length - 1);
+    }
+  } else if (dRow > 0) {
+    if (focusRow === SEARCH_ROW) {
+      focusRow = grid.length ? 0 : SEARCH_ROW; // DOWN from search bar → first row
+    } else {
+      focusRow = clamp(focusRow + dRow, grid.length - 1);
+      focusCol = clamp(focusCol, grid[focusRow].length - 1);
+    }
   }
-  if (dCol) {
+
+  if (dCol && focusRow !== SEARCH_ROW) {
     focusCol = clamp(focusCol + dCol, grid[focusRow].length - 1);
   }
   applyFocus();
 }
 
-// =====================================================================
-// Command handling (shared by WebSocket + keyboard)
-// =====================================================================
-
-function handleCommand(cmd) {
-  switch (cmd) {
-    case "UP":    move(-1, 0); break;
-    case "DOWN":  move(1, 0);  break;
-    case "LEFT":  move(0, -1); break;
-    case "RIGHT": move(0, 1);  break;
-    case "OK":    select();    break;
-    case "BACK":  goBack();    break;
-    default: console.warn("unknown command:", cmd);
+function homeSelect() {
+  if (focusRow === SEARCH_ROW) {
+    openKeyboard();
+    return;
   }
+  const card = grid[focusRow]?.[focusCol];
+  if (card) openDetail(card._media);
 }
 
-async function select() {
-  const card = grid[focusRow]?.[focusCol];
-  if (!card) return;
+// =====================================================================
+// Detail (episode list) screen — section 2
+// =====================================================================
 
-  showOverlay(`Loading ${titleOf(card._media)}…`);
-  try {
-    const res = await fetch(PLAY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: card.dataset.url, id: card.dataset.id }),
-    });
-    console.log("POST /play ->", res.status, await res.text().catch(() => ""));
-  } catch (err) {
-    console.error("POST /play failed:", err);
+let detailMedia = null;
+let epFocus = 0;
+let epCols = 1; // columns per row in the episode grid, for d-pad math
+
+function openDetail(media) {
+  detailMedia = media;
+
+  els.detailTitle.textContent = titleOf(media);
+
+  const bits = [];
+  if (media.averageScore) bits.push(`★ ${(media.averageScore / 10).toFixed(1)}`);
+  if (media.episodes) bits.push(`${media.episodes} episodes`);
+  if (media.genres?.length) bits.push(media.genres.slice(0, 3).join(" · "));
+  els.detailSub.textContent = bits.join("    ");
+  els.detailDesc.textContent = (media.description || "").replace(/<[^>]*>/g, " ").trim();
+
+  const art = media.bannerImage || media.coverImage?.extraLarge || media.coverImage?.large;
+  els.detailArt.style.background = art
+    ? `#0a0c14 url("${art}") center/cover no-repeat`
+    : `linear-gradient(135deg, ${media.coverImage?.color || "#2a2f55"}, #0a0c14)`;
+
+  // Build episode entries: 1..N, or a single "Play" entry when count is unknown.
+  els.episodes.innerHTML = "";
+  const n = media.episodes;
+  if (n && n > 0) {
+    for (let i = 1; i <= n; i++) {
+      els.episodes.append(makeEpisode(`Episode ${i}`, i));
+    }
+    els.episodes.classList.remove("single");
+  } else {
+    els.episodes.append(makeEpisode("Play", 1));
+    els.episodes.classList.add("single");
   }
+
+  epFocus = 0;
+
+  // Cross-fade from home to detail first, so the episode grid is laid out
+  // (visible) before we measure column count / scroll the focused entry.
+  crossFade(els.home, els.detail);
+  screen = "detail";
+  applyEpisodeFocus(true);
+}
+
+function makeEpisode(label, num) {
+  const el = document.createElement("button");
+  el.className = "episode";
+  el.textContent = label;
+  el.dataset.episode = num;
+  return el;
+}
+
+function applyEpisodeFocus(recomputeCols) {
+  const items = els.episodes.children;
+  if (!items.length) return;
+
+  // Infer how many columns the flex/grid wrapped into, for UP/DOWN math.
+  if (recomputeCols) {
+    const firstTop = items[0].offsetTop;
+    epCols = 0;
+    for (const it of items) {
+      if (it.offsetTop === firstTop) epCols++;
+      else break;
+    }
+    epCols = Math.max(1, epCols);
+  }
+
+  epFocus = clamp(epFocus, items.length - 1);
+  for (const it of items) it.classList.remove("focused");
+  const cur = items[epFocus];
+  cur.classList.add("focused");
+  cur.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function detailMove(dRow, dCol) {
+  const n = els.episodes.children.length;
+  if (!n) return;
+  if (dCol) epFocus = clamp(epFocus + dCol, n - 1);
+  if (dRow) epFocus = clamp(epFocus + dRow * epCols, n - 1);
+  applyEpisodeFocus(false);
+}
+
+function detailSelect() {
+  const cur = els.episodes.children[epFocus];
+  if (!cur) return;
+  const episode = parseInt(cur.dataset.episode, 10);
+  playEpisode(detailMedia, episode);
+}
+
+function closeDetail() {
+  crossFade(els.detail, els.home);
+  screen = "home";
+  // Restore the previously focused card; applyFocus() re-centers it.
+  applyFocus();
+}
+
+// =====================================================================
+// On-screen keyboard + search — section 3
+// =====================================================================
+
+// Alphabetical grid. Each cell: { label, type }, where type drives the action.
+// type: "char" inserts label; "space"/"del"/"search" are actions.
+const KB_LAYOUT = [
+  ["A", "B", "C", "D", "E", "F", "G"],
+  ["H", "I", "J", "K", "L", "M", "N"],
+  ["O", "P", "Q", "R", "S", "T", "U"],
+  ["V", "W", "X", "Y", "Z", "0", "1"],
+  ["2", "3", "4", "5", "6", "7", "8"],
+  ["9", "␣ space", "⌫ del", "⏎ search"],
+];
+
+let kbRow = 0;
+let kbCol = 0;
+let query = "";
+let searchTimer = null;
+let kbBuilt = false;
+
+function buildKeyboard() {
+  els.kbGrid.innerHTML = "";
+  KB_LAYOUT.forEach((row, r) => {
+    const rowEl = document.createElement("div");
+    rowEl.className = "kb-row";
+    row.forEach((label, c) => {
+      const key = document.createElement("div");
+      key.className = "kb-key";
+      const type =
+        label.includes("space") ? "space" :
+        label.includes("del")   ? "del"   :
+        label.includes("search")? "search": "char";
+      if (type !== "char") key.classList.add("kb-wide", `kb-${type}`);
+      key.dataset.type = type;
+      key.dataset.value = type === "char" ? label : "";
+      key.textContent = label;
+      key.dataset.row = r;
+      key.dataset.col = c;
+      rowEl.append(key);
+    });
+    els.kbGrid.append(rowEl);
+  });
+  kbBuilt = true;
+}
+
+function openKeyboard() {
+  if (!kbBuilt) buildKeyboard();
+  query = "";
+  kbRow = 0;
+  kbCol = 0;
+  updateQueryDisplay();
+  applyKeyFocus();
+  els.keyboard.classList.remove("hidden");
+  screen = "keyboard";
+}
+
+function closeKeyboard() {
+  els.keyboard.classList.add("hidden");
+  screen = "home";
+  applyFocus();
+}
+
+function updateQueryDisplay() {
+  els.kbQuery.textContent = query;
+  els.searchLabel.textContent = query || "Search";
+}
+
+function applyKeyFocus() {
+  const rows = els.kbGrid.children;
+  kbRow = clamp(kbRow, rows.length - 1);
+  kbCol = clamp(kbCol, rows[kbRow].children.length - 1);
+  els.kbGrid.querySelectorAll(".kb-key.focused").forEach((k) => k.classList.remove("focused"));
+  rows[kbRow].children[kbCol].classList.add("focused");
+}
+
+function kbMove(dRow, dCol) {
+  const rows = els.kbGrid.children;
+  if (dRow) kbRow = clamp(kbRow + dRow, rows.length - 1);
+  if (dCol) kbCol = clamp(kbCol + dCol, rows[kbRow].children.length - 1);
+  applyKeyFocus();
+}
+
+function kbSelect() {
+  const key = els.kbGrid.children[kbRow].children[kbCol];
+  switch (key.dataset.type) {
+    case "char":   query += key.dataset.value; break;
+    case "space":  query += " "; break;
+    case "del":    query = query.slice(0, -1); break;
+    case "search": runSearch(); return; // close keyboard, show results
+  }
+  updateQueryDisplay();
+  scheduleLiveSearch();
+}
+
+// Live-as-you-type: debounce so each keystroke doesn't hammer AniList.
+function scheduleLiveSearch() {
+  clearTimeout(searchTimer);
+  const term = query.trim();
+  if (term.length < 2) return;
+  searchTimer = setTimeout(() => runSearch({ keepKeyboard: true }), 350);
+}
+
+async function runSearch({ keepKeyboard = false } = {}) {
+  const term = query.trim();
+  if (!term) return;
+  try {
+    const media = await searchAnime(term);
+    render([{ title: `Results for “${term}”`, media }]);
+  } catch (err) {
+    console.error("AniList search failed:", err);
+    render([{ title: `Results for “${term}”`, media: [] }]);
+  }
+  if (!keepKeyboard) closeKeyboard();
+}
+
+// =====================================================================
+// Playback (placeholder until M4 swaps in the real scraper)
+// =====================================================================
+
+function playEpisode(media, episode) {
+  const title = titleOf(media);
+  showOverlay(`Loading ${title} — Episode ${episode}…`);
+  fetch(PLAY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // The scraper (M4) resolves "<title> episode N" to a real stream URL.
+    body: JSON.stringify({ id: media.id, title, episode, query: `${title} episode ${episode}` }),
+  })
+    .then(async (res) => console.log("POST /play ->", res.status, await res.text().catch(() => "")))
+    .catch((err) => console.error("POST /play failed:", err));
   // Placeholder: no real playback yet (M4). Drop the overlay shortly.
   setTimeout(hideOverlay, 1200);
-}
-
-function goBack() {
-  // During real playback this will tell the backend to stop mpv. For the
-  // shell, just dismiss the overlay if it's up.
-  if (!els.overlay.classList.contains("hidden")) hideOverlay();
 }
 
 function showOverlay(text) {
@@ -291,6 +569,61 @@ function showOverlay(text) {
 }
 function hideOverlay() {
   els.overlay.classList.add("hidden");
+}
+
+// Soft cross-fade between two full-screen screens.
+function crossFade(from, to) {
+  to.classList.remove("hidden");
+  // Force reflow so the fade-in transition actually runs.
+  void to.offsetWidth;
+  from.classList.add("fade-out");
+  to.classList.remove("fade-out");
+  setTimeout(() => from.classList.add("hidden"), 300);
+}
+
+// =====================================================================
+// Command handling (shared by WebSocket + keyboard) — screen state machine
+// =====================================================================
+
+function handleCommand(cmd) {
+  // If the loading overlay is up, BACK always dismisses it first.
+  if (cmd === "BACK" && !els.overlay.classList.contains("hidden")) {
+    hideOverlay();
+    return;
+  }
+
+  switch (screen) {
+    case "home":
+      if (cmd === "UP")    homeMove(-1, 0);
+      else if (cmd === "DOWN")  homeMove(1, 0);
+      else if (cmd === "LEFT")  homeMove(0, -1);
+      else if (cmd === "RIGHT") homeMove(0, 1);
+      else if (cmd === "OK")    homeSelect();
+      // BACK on home does nothing (already at root).
+      break;
+
+    case "detail":
+      if (cmd === "UP")    detailMove(-1, 0);
+      else if (cmd === "DOWN")  detailMove(1, 0);
+      else if (cmd === "LEFT")  detailMove(0, -1);
+      else if (cmd === "RIGHT") detailMove(0, 1);
+      else if (cmd === "OK")    detailSelect();
+      else if (cmd === "BACK")  closeDetail();
+      break;
+
+    case "keyboard":
+      if (cmd === "UP")    kbMove(-1, 0);
+      else if (cmd === "DOWN")  kbMove(1, 0);
+      else if (cmd === "LEFT")  kbMove(0, -1);
+      else if (cmd === "RIGHT") kbMove(0, 1);
+      else if (cmd === "OK")    kbSelect();
+      else if (cmd === "BACK") {
+        // BACK deletes a character; on an empty query it closes the keyboard.
+        if (query) { query = query.slice(0, -1); updateQueryDisplay(); scheduleLiveSearch(); }
+        else closeKeyboard();
+      }
+      break;
+  }
 }
 
 // ---- Keyboard fallback (dev convenience) ----

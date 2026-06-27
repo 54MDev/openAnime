@@ -188,3 +188,200 @@ html, body {
   animation: spin 1s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* =====================================================================
+   Screens + cross-fade (sections 2 & 3)
+   ===================================================================== */
+.screen {
+  transition: opacity .3s var(--ease);
+}
+.screen.hidden {
+  display: none;
+}
+.screen.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Detail + keyboard are full-screen layers above the home grid. */
+.detail, .keyboard {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+/* ---- Search bar (section 3) ---- */
+.searchbar {
+  display: flex;
+  align-items: center;
+  gap: 1vw;
+  margin: 0 4vw 1vh;
+  padding: 1.4vh 1.6vw;
+  border-radius: 1vw;
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: 1.5vw;
+  font-weight: 600;
+  border: .25vw solid transparent;
+  transition: border-color .25s var(--ease), background .25s var(--ease), transform .25s var(--ease);
+}
+.searchbar.focused {
+  border-color: var(--focus);
+  background: #1b2236;
+  color: var(--text);
+  transform: scale(1.01);
+}
+.search-icon { font-size: 1.8vw; color: var(--accent); }
+
+/* =====================================================================
+   Detail (episode list) screen — section 2
+   ===================================================================== */
+.detail {
+  background: var(--bg);
+  overflow-y: auto;
+}
+.detail-art {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 56vh;
+  background: linear-gradient(135deg, #2a2f55, #0a0c14);
+}
+.detail-scrim {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 56vh;
+  background:
+    linear-gradient(to top, var(--bg) 2%, transparent 60%),
+    linear-gradient(to right, rgba(10,12,20,.85) 0%, transparent 60%);
+}
+.detail-body {
+  position: relative;
+  z-index: 1;
+  padding: 30vh 4vw 8vh;
+}
+.detail-meta { max-width: 60vw; }
+.detail-meta h1 {
+  font-size: 4vw;
+  font-weight: 800;
+  line-height: 1.02;
+  text-shadow: 0 .3vh 2vh rgba(0,0,0,.6);
+}
+.detail-sub {
+  margin-top: 1vh;
+  font-size: 1.5vw;
+  color: var(--accent);
+  font-weight: 600;
+}
+.detail-desc {
+  margin-top: 1.2vh;
+  font-size: 1.3vw;
+  color: var(--text-dim);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.detail-eps-heading {
+  margin: 4vh 0 1.6vh;
+  font-size: 1.8vw;
+  font-weight: 700;
+}
+
+/* Episode grid: wraps into rows; d-pad navigates 2D. */
+.episodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.4vw;
+}
+.episode {
+  flex: 0 0 14vw;
+  height: 7vw;
+  border: .25vw solid transparent;
+  border-radius: .8vw;
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 1.3vw;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: none;
+  transition: transform .25s var(--ease), border-color .25s var(--ease), background .25s var(--ease);
+}
+.episodes.single .episode {
+  flex-basis: 22vw;
+  background: linear-gradient(135deg, var(--accent), #3a5fd0);
+}
+.episode.focused {
+  transform: scale(1.08);
+  border-color: var(--focus);
+  background: #1b2236;
+  box-shadow: 0 1vh 3vh rgba(0,0,0,.5);
+}
+.episodes.single .episode.focused {
+  background: linear-gradient(135deg, var(--accent), #3a5fd0);
+}
+
+/* =====================================================================
+   On-screen keyboard — section 3
+   ===================================================================== */
+.keyboard {
+  background: rgba(6,8,14,.95);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4vh;
+}
+.kb-query-wrap {
+  min-height: 4vw;
+  font-size: 3vw;
+  font-weight: 700;
+  letter-spacing: .03em;
+  border-bottom: .3vh solid var(--accent);
+  min-width: 50vw;
+  text-align: center;
+  padding-bottom: 1vh;
+}
+.kb-query { color: var(--text); }
+.kb-caret {
+  color: var(--accent);
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.kb-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2vh;
+}
+.kb-row {
+  display: flex;
+  gap: 1.2vw;
+  justify-content: center;
+}
+.kb-key {
+  width: 6vw;
+  height: 6vw;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: .8vw;
+  background: var(--bg-elevated);
+  font-size: 2.2vw;
+  font-weight: 700;
+  border: .25vw solid transparent;
+  transition: transform .2s var(--ease), border-color .2s var(--ease), background .2s var(--ease);
+}
+.kb-key.kb-wide {
+  width: auto;
+  padding: 0 2vw;
+  font-size: 1.5vw;
+}
+.kb-key.kb-search { background: var(--accent); color: #fff; }
+.kb-key.focused {
+  transform: scale(1.12);
+  border-color: var(--focus);
+  background: #1b2236;
+  z-index: 1;
+}
+.kb-key.kb-search.focused { background: #3a5fd0; }
