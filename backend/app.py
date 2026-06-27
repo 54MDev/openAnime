@@ -23,11 +23,14 @@ import asyncio
 import http.server
 import json
 import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
 
 import websockets
+
+import scraper
 
 try:
     import msgpack
@@ -42,6 +45,14 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 ROUTER_SOCKET = os.environ.get("OPENANIME_ROUTER", "/var/run/arduino-router.sock")
 IR_METHOD = "ir_command"
 VALID_COMMANDS = {"UP", "DOWN", "LEFT", "RIGHT", "OK", "BACK"}
+
+# Playback config (overridable via env on the device).
+MPV_BIN = os.environ.get("OPENANIME_MPV", "mpv")
+# e.g. "alsa/default" or a specific card "alsa/plughw:1,0". Unset = mpv default,
+# which honours /etc/asound.conf (see build-instructions.md, Phase 3).
+AUDIO_DEVICE = os.environ.get("OPENANIME_AUDIO_DEVICE")
+# wmctrl matches window title substrings; Chromium's title ends in "Chromium".
+BROWSER_WINDOW = os.environ.get("OPENANIME_BROWSER", "Chromium")
 
 # MessagePack-RPC message type codes
 REQUEST, RESPONSE, NOTIFICATION = 0, 1, 2
@@ -72,29 +83,131 @@ def broadcast(command):
     websockets.broadcast(clients, command)
 
 
+# =====================================================================
+# Playback: resolve a stream, launch mpv over the browser, restore on exit.
+#
+# Each /play request runs on its own ThreadingHTTPServer thread and blocks for
+# the whole viewing session: the HTTP response doesn't return until mpv exits
+# (naturally or via /stop). The frontend treats that long-lived request as the
+# "now playing" state, so there's no separate event channel to keep in sync.
+# =====================================================================
+
+_play_lock = threading.Lock()
+_mpv_proc = None  # the live mpv process, or None when nothing is playing
+
+
+def _wmctrl(state):
+    """Toggle the browser window's hidden state (no-op if wmctrl is missing)."""
+    try:
+        subprocess.run(["wmctrl", "-r", BROWSER_WINDOW, "-b", state],
+                       timeout=5, capture_output=True)
+    except FileNotFoundError:
+        pass  # dev machine without wmctrl / not in kiosk mode
+    except Exception as e:
+        print(f"[play] wmctrl {state} failed: {e}", file=sys.stderr)
+
+
+def play_blocking(stream, title, episode):
+    """Launch mpv and block until it exits. Returns a status dict for the UI.
+
+    `stream` is a scraper.Stream (url + http_headers). The extracted .m3u8 is
+    referer-gated, so Referer/User-Agent from the scraper must be forwarded or
+    the CDN 403s.
+    """
+    global _mpv_proc
+    cmd = [MPV_BIN, "--fullscreen", "--ontop", "--no-terminal", "--really-quiet",
+           f"--force-media-title={title} — Episode {episode}"]
+    if AUDIO_DEVICE:
+        cmd.append(f"--audio-device={AUDIO_DEVICE}")
+    # Forward the gating headers. (Only referer + UA; other headers like Accept
+    # contain commas, which mpv's --http-header-fields would mis-split.)
+    for key, value in (stream.headers or {}).items():
+        if key.lower() == "referer":
+            cmd.append(f"--referrer={value}")
+        elif key.lower() == "user-agent":
+            cmd.append(f"--user-agent={value}")
+    cmd.append(stream.url)
+
+    with _play_lock:
+        if _mpv_proc and _mpv_proc.poll() is None:
+            return {"status": "busy"}  # already watching something
+        _wmctrl("add,hidden")  # suspend Chromium so mpv owns the screen
+        try:
+            _mpv_proc = subprocess.Popen(cmd)
+        except FileNotFoundError:
+            _wmctrl("remove,hidden")
+            return {"status": "error", "error": f"{MPV_BIN} not found"}
+        proc = _mpv_proc
+
+    print(f"[play] mpv started: {title} ep {episode}")
+    rc = proc.wait()  # blocks here for the whole session (lock released)
+
+    with _play_lock:
+        if _mpv_proc is proc:
+            _mpv_proc = None
+        _wmctrl("remove,hidden")  # restore Chromium / the UI
+    print(f"[play] mpv exited ({rc}); browser restored")
+    return {"status": "ended", "code": rc}
+
+
+def stop_playback():
+    """Ask the current mpv to quit; play_blocking() handles the restore."""
+    with _play_lock:
+        if _mpv_proc and _mpv_proc.poll() is None:
+            print("[play] STOP -> terminating mpv")
+            _mpv_proc.terminate()
+            return True
+    return False
+
+
 class FrontendHandler(http.server.SimpleHTTPRequestHandler):
     """Serves the frontend/ directory and handles the placeholder /play POST.
 
     Static files (index.html, style.css, app.js) are served straight from
-    FRONTEND_DIR. POST /play currently just logs the request and returns OK --
-    Milestone 4 will wire it to the scraper + mpv.
+    FRONTEND_DIR. POST /play resolves a stream and blocks for the viewing
+    session; POST /stop ends the current playback.
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(FRONTEND_DIR), **kwargs)
 
     def do_POST(self):
-        if self.path.rstrip("/") == "/play":
-            length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length) if length else b""
-            try:
-                payload = json.loads(raw or b"{}")
-            except json.JSONDecodeError:
-                payload = {"_raw": raw.decode("utf-8", "replace")}
-            print(f"[play] (placeholder) request: {payload}")
-            self._json(200, {"status": "ok", "received": payload})
+        path = self.path.rstrip("/")
+        if path == "/play":
+            self._handle_play()
+        elif path == "/stop":
+            stopped = stop_playback()
+            self._json(200, {"status": "stopping" if stopped else "idle"})
         else:
             self._json(404, {"error": "not found"})
+
+    def _handle_play(self):
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b""
+        try:
+            payload = json.loads(raw or b"{}")
+        except json.JSONDecodeError:
+            self._json(400, {"status": "error", "error": "invalid JSON"})
+            return
+
+        title = payload.get("title") or "Unknown"
+        episode = payload.get("episode", 1)
+        # A direct watch URL may be passed via "url" for manual testing; normally
+        # we search by the bare title (the episode number is selected separately).
+        target = payload.get("url")
+        print(f"[play] request: {title!r} ep {episode}")
+
+        try:
+            stream = scraper.get_stream_url(target, title=title, episode=episode)
+        except scraper.ScrapeError as e:
+            print(f"[play] scrape failed: {e}", file=sys.stderr)
+            self._json(502, {"status": "error", "error": str(e)})
+            return
+
+        print(f"[play] resolved -> {stream.page}")
+        result = play_blocking(stream, title, episode)
+        code = 200 if result.get("status") in ("ended", "busy") else 502
+        self._json(code, result)
 
     def do_OPTIONS(self):  # CORS preflight (lets a file:// dev page POST here)
         self.send_response(204)

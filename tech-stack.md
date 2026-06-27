@@ -33,7 +33,7 @@ The STM32 acts purely as an IR translator. It receives raw IR pulses, decodes th
 | Python | 3.11+ | Backend runtime |
 | msgpack | 1.x | Speaks MessagePack-RPC to `arduino-router`; registers `ir_command` to receive button presses from the MCU |
 | websockets | 12.x | Broadcasts IR commands to the frontend in real time |
-| yt-dlp | latest | Extracts direct stream URLs from anime sites; replaces custom scraper |
+| yt-dlp | >= 2025.12.08 | Extracts direct stream URLs; driven via a vendored, patched anikoto extractor plugin (`backend/plugins/`) |
 | asyncio | stdlib | Runs serial listener and WebSocket server concurrently on one thread |
 | subprocess | stdlib | Launches and monitors mpv for video playback |
 
@@ -41,7 +41,20 @@ The STM32 acts purely as an IR translator. It receives raw IR pulses, decodes th
 The Uno Q's App Lab SDK has first-class Python support for the MCU↔MPU serial bridge. Python's asyncio handles the serial + WebSocket concurrency cleanly without threads.
 
 ### Why yt-dlp over BeautifulSoup
-Target sites (animepahe, anikoto, reanime) are JavaScript-rendered SPAs. BeautifulSoup only parses static HTML and cannot execute JS or bypass Cloudflare. yt-dlp handles all of this internally and is actively maintained against site changes.
+Target anime sites are JavaScript-rendered SPAs. BeautifulSoup only parses static HTML and can't execute JS. yt-dlp handles player extraction internally and is actively maintained against site changes.
+
+### Source site: anikoto.cz (not animepahe / AllAnime)
+The original plan targeted animepahe. As of mid-2026 animepahe.pw and AllAnime
+(api.allanime.day) sit behind Cloudflare **interactive challenges** ("Just a
+moment…") that require running real browser JS to pass — no headless HTTP client,
+yt-dlp included, can get through. **anikoto.cz** runs Cloudflare in plain CDN
+mode (no challenge), so it's reachable from the headless device. Extraction uses
+the community `yt-dlp-anikoto` plugin (org archived June 2026), vendored and
+patched under `backend/plugins/` (new player host `vidtube.site`, generic `s-N`
+server segments, dead-mirror skipping). The extracted `.m3u8` is referer-gated;
+`scraper.py` returns the required `Referer`/`User-Agent` and `app.py` forwards
+them to mpv. The scraper keeps a pluggable provider list so reanime/others can be
+added as they're verified.
 
 ---
 
