@@ -55,12 +55,18 @@ Open Serial Monitor at 9600 baud, press each button, and record:
 
 ### 1.5 Upload final firmware
 
+The final firmware sends each button to the Linux side over the **Arduino Router
+Bridge** (`Bridge.notify("ir_command", "UP")`), not over plain `Serial` — that's
+the only way to reach the Linux MPU on the Uno Q. Install the **Arduino_RouterBridge**
+library first (Arduino IDE → Library Manager → search "Arduino_RouterBridge").
+
 Open `firmware/firmware/firmware.ino`, replace the hex values near the top with
 your recorded codes, make sure the board is **Arduino UNO Q** and the correct
 port is selected, and upload.
 
-**Verify:** Open Serial Monitor at 9600 baud, press buttons — you should see
-`UP`, `DOWN`, etc. printed cleanly.
+**Verify:** the firmware echoes each press to the App Lab Monitor via
+`Monitor.println()`. The real end-to-end check happens in Phase 4 once the
+backend is running — pressing a button should reach the browser over WebSocket.
 
 **Wiring note:** The KY-022 pin order is not obvious — confirm Signal (`S`),
 VCC (middle), and GND (`−`) before powering up. Swapping VCC/Signal lets the
@@ -96,8 +102,13 @@ sudo apt install -y \
 
 ### 2.3 Install Python dependencies
 
+On the Uno Q the MCU does **not** expose a plain serial port to Linux — the
+`arduino-router` daemon owns that link and speaks MessagePack-RPC over a Unix
+socket. So the backend needs `msgpack` and `websockets`, not pyserial. Install
+them from apt (newer Debian blocks system-wide `pip install`):
+
 ```bash
-pip3 install pyserial websockets
+sudo apt install -y python3-msgpack python3-websockets
 ```
 
 ### 2.4 Install yt-dlp
@@ -152,19 +163,16 @@ You should hear audio from your USB device. If it cuts out after a few minutes, 
 git clone https://github.com/YOUR_USERNAME/openAnime.git /home/user/openAnime
 ```
 
-### 4.2 Find the serial bridge device
+### 4.2 The router socket (usually no config needed)
 
-The STM32 communicates with Linux over an internal serial bridge. Find the device name:
+The MCU talks to Linux through the `arduino-router` daemon, which listens on a
+Unix socket at `/var/run/arduino-router.sock`. `backend/app.py` connects there by
+default — there is normally nothing to configure. Confirm the socket exists:
 ```bash
-ls /dev/tty*
+ls -l /var/run/arduino-router.sock
 ```
-
-Common names: `/dev/ttyS0`, `/dev/ttyAMA0`, `/dev/ttyUSB0`. If unsure, check:
-```bash
-dmesg | grep tty
-```
-
-Update `backend/app.py` with the correct device path.
+If your image puts it elsewhere, override with `--router /path/to.sock` or the
+`OPENANIME_ROUTER` env var.
 
 ### 4.3 Test the backend manually
 
@@ -249,8 +257,8 @@ The TV should show the openAnime UI within ~30 seconds of powering on, with no k
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| Remote buttons do nothing | Wrong serial port in app.py | Run `dmesg \| grep tty` after pressing a button to find the port |
-| Serial port permission denied | User not in dialout group | `sudo usermod -aG dialout user` then log out/in |
+| Remote buttons do nothing | Backend not registered with router, or firmware not using Bridge | Check `app.py` log shows `registered 'ir_command'`; confirm firmware uses `Bridge.notify` and Arduino_RouterBridge is installed |
+| `cannot connect to ...arduino-router.sock` | Router daemon down or socket moved | `systemctl status arduino-router`; check `ls /var/run/arduino-router.sock`, override with `--router` |
 | Chromium won't open | Backend not ready yet | Increase `sleep 3` in Openbox autostart to `sleep 8` |
 | No audio | Wrong ALSA card number | Re-run `aplay -l` and update `/etc/asound.conf` |
 | Audio cuts out | Known Uno Q USB driver bug | Switch to Bluetooth speaker or USB hub with powered ports |

@@ -1,6 +1,17 @@
 // Final IR firmware for openAnime.
 // Decodes NEC by capturing raw edge timings (pulseIn()/IRremote don't work on Zephyr).
-// Reads codes from the KY-022 and writes named commands over serial.
+//
+// On the Uno Q the MCU does NOT reach Linux over a plain serial port -- the
+// arduino-router daemon owns that link. Instead we send each button to the
+// Linux side as a MessagePack-RPC notification over the Router Bridge:
+//   Bridge.notify("ir_command", "UP");
+// The Python backend (backend/app.py) registers "ir_command" with the router
+// and receives these.
+//
+// Requires the "Arduino_RouterBridge" library (install via the Arduino IDE
+// Library Manager, or it ships with the UNO Q board package).
+
+#include <Arduino_RouterBridge.h>
 
 #define IR_PIN A0
 #define GAP_US 10000UL   // idle gap that marks the end of a frame
@@ -15,7 +26,7 @@
 // --------------------------------------------------
 
 void setup() {
-    Serial.begin(9600);
+    Bridge.begin();                    // connect to arduino-router (replaces Serial)
     pinMode(IR_PIN, INPUT_PULLUP);
 }
 
@@ -50,12 +61,17 @@ void loop() {
     uint32_t code = readNEC();
     if (code == 0) return;
 
-    if      (code == HEX_UP)    Serial.println("UP");
-    else if (code == HEX_DOWN)  Serial.println("DOWN");
-    else if (code == HEX_LEFT)  Serial.println("LEFT");
-    else if (code == HEX_RIGHT) Serial.println("RIGHT");
-    else if (code == HEX_OK)    Serial.println("OK");
-    else if (code == HEX_BACK)  Serial.println("BACK");
+    const char* cmd = nullptr;
+    if      (code == HEX_UP)    cmd = "UP";
+    else if (code == HEX_DOWN)  cmd = "DOWN";
+    else if (code == HEX_LEFT)  cmd = "LEFT";
+    else if (code == HEX_RIGHT) cmd = "RIGHT";
+    else if (code == HEX_OK)    cmd = "OK";
+    else if (code == HEX_BACK)  cmd = "BACK";
 
-    delay(250);   // debounce repeats
+    if (cmd != nullptr) {
+        Bridge.notify("ir_command", cmd);   // push to the Linux backend
+        Monitor.println(cmd);               // debug echo to the App Lab console
+        delay(250);                         // debounce repeats
+    }
 }

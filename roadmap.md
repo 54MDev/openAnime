@@ -21,7 +21,7 @@ Five milestones, each independently testable before moving to the next. Never mo
 ## Milestone 2 — Backend Bridge
 **Goal:** IR command from remote → WebSocket message received in a browser tab.
 
-- [x] Write `app.py` with asyncio serial reader + WebSocket server on port 8765
+- [x] Write `app.py` with asyncio arduino-router socket reader (MessagePack-RPC) + WebSocket server on port 8765
 - [x] Write a minimal test HTML page that connects to ws://localhost:8765 and logs messages
 - [ ] Open test page in Chromium; verify button presses appear in browser console
 

@@ -19,9 +19,10 @@
 | Technology | Version | Purpose |
 |------------|---------|---------|
 | Arduino C++ | — | MCU firmware language |
-| IRremote.h | 4.x | Decodes IR signals from KY-022; outputs named command strings over serial bridge |
+| Raw GPIO NEC decode | — | Decodes IR by timing `digitalRead()` edges with `micros()` (IRremote/`pulseIn()` don't work on the Zephyr core) |
+| Arduino_RouterBridge | — | Sends decoded commands to the Linux side via MessagePack-RPC (`Bridge.notify`) |
 
-The STM32 acts purely as an IR translator. It receives raw IR pulses, decodes them into hex codes, maps them to human-readable strings (`UP`, `DOWN`, `LEFT`, `RIGHT`, `OK`, `BACK`), and writes them to the internal serial bridge shared with the Linux MPU side.
+The STM32 acts purely as an IR translator. It receives raw IR pulses, decodes them into hex codes, maps them to human-readable strings (`UP`, `DOWN`, `LEFT`, `RIGHT`, `OK`, `BACK`), and pushes each one to the Linux MPU with `Bridge.notify("ir_command", ...)`. The MCU↔MPU link (`/dev/ttyHS1`) is owned by the `arduino-router` daemon — sketches cannot use it as a plain serial port.
 
 ---
 
@@ -30,7 +31,7 @@ The STM32 acts purely as an IR translator. It receives raw IR pulses, decodes th
 | Technology | Version | Purpose |
 |------------|---------|---------|
 | Python | 3.11+ | Backend runtime |
-| pyserial | 3.5+ | Reads command strings from the STM32 over internal serial bridge |
+| msgpack | 1.x | Speaks MessagePack-RPC to `arduino-router`; registers `ir_command` to receive button presses from the MCU |
 | websockets | 12.x | Broadcasts IR commands to the frontend in real time |
 | yt-dlp | latest | Extracts direct stream URLs from anime sites; replaces custom scraper |
 | asyncio | stdlib | Runs serial listener and WebSocket server concurrently on one thread |
