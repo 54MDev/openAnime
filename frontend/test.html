@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>openAnime — WebSocket bridge test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #111; color: #eee;
+           margin: 0; padding: 2rem; }
+    h1 { font-size: 1.2rem; font-weight: 600; }
+    #status { display: inline-block; padding: .25rem .75rem; border-radius: 1rem;
+              font-size: .85rem; }
+    .up { background: #1e5631; color: #b6f5c8; }
+    .down { background: #5e1c1c; color: #f5b6b6; }
+    #last { font-size: 4rem; font-weight: 700; margin: 1.5rem 0; min-height: 4.5rem; }
+    #log { font-family: ui-monospace, monospace; font-size: .85rem;
+           background: #000; padding: 1rem; border-radius: .5rem;
+           height: 16rem; overflow-y: auto; }
+    #log div { padding: .1rem 0; border-bottom: 1px solid #1d1d1d; }
+  </style>
+</head>
+<body>
+  <h1>openAnime WebSocket bridge test &middot; <span id="status" class="down">connecting…</span></h1>
+  <p>Connects to <code>ws://localhost:8765</code> and logs every command the backend broadcasts.</p>
+  <div id="last">—</div>
+  <div id="log"></div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const lastEl = document.getElementById('last');
+    const logEl = document.getElementById('log');
+
+    function log(msg) {
+      const row = document.createElement('div');
+      row.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+      logEl.prepend(row);
+    }
+
+    function connect() {
+      const ws = new WebSocket('ws://localhost:8765');
+
+      ws.onopen = () => {
+        statusEl.textContent = 'connected';
+        statusEl.className = 'up';
+        log('connected');
+      };
+      ws.onmessage = (e) => {
+        lastEl.textContent = e.data;
+        log('command: ' + e.data);
+        console.log('IR command:', e.data);
+      };
+      ws.onclose = () => {
+        statusEl.textContent = 'disconnected — retrying';
+        statusEl.className = 'down';
+        log('disconnected, retrying in 1s');
+        setTimeout(connect, 1000);
+      };
+      ws.onerror = () => ws.close();
+    }
+
+    connect();
+  </script>
+</body>
+</html>

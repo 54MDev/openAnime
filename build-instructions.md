@@ -4,7 +4,7 @@
 
 Before starting, you need:
 - Arduino Uno Q with Debian Linux booted and SSH or keyboard/monitor access
-- KY-022 IR receiver wired to the STM32 MCU header (Signal → PA0, VCC → 3.3V, GND → GND)
+- KY-022 IR receiver wired to the MCU header (Signal → A0, VCC → 3.3V or 5V, GND → GND)
 - USB-C audio adapter plugged into the hub's USB-A port
 - USB-C hub connected (HDMI to TV, PD in for power)
 - Internet connection (Wi-Fi configured or Ethernet dongle)
@@ -18,41 +18,29 @@ Before starting, you need:
 
 Download from [arduino.cc/en/software](https://www.arduino.cc/en/software). The Uno Q's STM32 is programmed from a host computer via USB, not from the Linux side directly.
 
-### 1.2 Add the STM32 board package
+### 1.2 Add the Arduino UNO Q board package
 
-In Arduino IDE → Preferences → Additional Board Manager URLs, add:
-```
-https://github.com/stm32duino/BoardManagerFiles/raw/main/package_stmicroelectronics_index.json
-```
-Then: Tools → Board → Board Manager → search "STM32" → install "STM32 MCU based boards".
+In Arduino IDE → Tools → Board → Board Manager → search "UNO Q" → install the
+**Arduino UNO Q** package (provides the `arduino:zephyr` core). The Uno Q's MCU
+runs on Zephyr, **not** STM32duino — do not install the STM32 package.
 
-### 1.3 Install IRremote library
+Then select **Tools → Board → Arduino UNO Q** and the port that appears as
+`/dev/cu.usbmodem...` (the other ports — wlan-debug, debug-console, Bluetooth —
+are the Linux side; ignore them).
 
-Sketch → Include Library → Manage Libraries → search "IRremote" → install version 4.x by shirriff/z3t0/ArminJo.
+### 1.3 Do NOT use the IRremote library
+
+The IRremote library and Arduino's `pulseIn()` both fail on the Zephyr core
+(IRremote errors with "no timer functions implemented for this CPU / board";
+`pulseIn()` silently returns 0). The firmware in this repo decodes NEC manually
+by timing raw GPIO edges with `digitalRead()` + `micros()`, which works on Zephyr.
+No external library is required.
 
 ### 1.4 Run the detection sketch first
 
-Before uploading the final firmware, upload a raw detection sketch to find your remote's hex codes:
-
-```cpp
-#include <IRremote.hpp>
-#define IR_RECEIVE_PIN PA0
-
-void setup() {
-    Serial.begin(9600);
-    IrReceiver.begin(IR_RECEIVE_PIN, ENABLE_LED_FEEDBACK);
-}
-
-void loop() {
-    if (IrReceiver.decode()) {
-        Serial.print("Protocol: ");
-        Serial.print(IrReceiver.decodedIRData.protocol);
-        Serial.print("  HEX: 0x");
-        Serial.println(IrReceiver.decodedIRData.decodedRawData, HEX);
-        IrReceiver.resume();
-    }
-}
-```
+Before uploading the final firmware, upload `firmware/ir_detect/ir_detect.ino`
+to find your remote's hex codes. It captures raw NEC pulses and prints a hex
+code per button press.
 
 Open Serial Monitor at 9600 baud, press each button, and record:
 
@@ -67,9 +55,17 @@ Open Serial Monitor at 9600 baud, press each button, and record:
 
 ### 1.5 Upload final firmware
 
-Open `firmware/firmware.ino`, replace the placeholder hex values at the top with your recorded codes, select the correct STM32 board and port, and upload.
+Open `firmware/firmware/firmware.ino`, replace the hex values near the top with
+your recorded codes, make sure the board is **Arduino UNO Q** and the correct
+port is selected, and upload.
 
-**Verify:** Open Serial Monitor, press buttons — you should see `UP`, `DOWN`, etc. printed cleanly.
+**Verify:** Open Serial Monitor at 9600 baud, press buttons — you should see
+`UP`, `DOWN`, etc. printed cleanly.
+
+**Wiring note:** The KY-022 pin order is not obvious — confirm Signal (`S`),
+VCC (middle), and GND (`−`) before powering up. Swapping VCC/Signal lets the
+module's LED flash but produces no usable output. The signal wire must go to
+**A0** (an analog-labeled pin used here as a digital input).
 
 ---
 
