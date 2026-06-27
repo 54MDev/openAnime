@@ -20,8 +20,12 @@ Override the socket path with --router or the OPENANIME_ROUTER env var.
 
 import argparse
 import asyncio
+import http.server
+import json
 import os
 import sys
+import threading
+from pathlib import Path
 
 import websockets
 
@@ -32,6 +36,9 @@ except ImportError:
 
 WS_HOST = "0.0.0.0"
 WS_PORT = 8765
+HTTP_HOST = "0.0.0.0"
+HTTP_PORT = int(os.environ.get("OPENANIME_HTTP_PORT", "8080"))
+FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 ROUTER_SOCKET = os.environ.get("OPENANIME_ROUTER", "/var/run/arduino-router.sock")
 IR_METHOD = "ir_command"
 VALID_COMMANDS = {"UP", "DOWN", "LEFT", "RIGHT", "OK", "BACK"}
@@ -63,6 +70,60 @@ def broadcast(command):
         return
     print(f"[ir] {command} -> {len(clients)} client(s)")
     websockets.broadcast(clients, command)
+
+
+class FrontendHandler(http.server.SimpleHTTPRequestHandler):
+    """Serves the frontend/ directory and handles the placeholder /play POST.
+
+    Static files (index.html, style.css, app.js) are served straight from
+    FRONTEND_DIR. POST /play currently just logs the request and returns OK --
+    Milestone 4 will wire it to the scraper + mpv.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(FRONTEND_DIR), **kwargs)
+
+    def do_POST(self):
+        if self.path.rstrip("/") == "/play":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b""
+            try:
+                payload = json.loads(raw or b"{}")
+            except json.JSONDecodeError:
+                payload = {"_raw": raw.decode("utf-8", "replace")}
+            print(f"[play] (placeholder) request: {payload}")
+            self._json(200, {"status": "ok", "received": payload})
+        else:
+            self._json(404, {"error": "not found"})
+
+    def do_OPTIONS(self):  # CORS preflight (lets a file:// dev page POST here)
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.end_headers()
+
+    def end_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        super().end_headers()
+
+    def _json(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass  # keep stdout focused on IR/play events
+
+
+def start_http_server():
+    """Serve the frontend (and /play) on a background daemon thread."""
+    server = http.server.ThreadingHTTPServer((HTTP_HOST, HTTP_PORT), FrontendHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    print(f"[http] serving {FRONTEND_DIR} on http://localhost:{HTTP_PORT}")
+    return server
 
 
 async def router_reader(socket_path):
@@ -147,6 +208,7 @@ async def main():
                         help="read commands from stdin instead of the router")
     args = parser.parse_args()
 
+    start_http_server()
     async with websockets.serve(register, WS_HOST, WS_PORT):
         print(f"[ws] listening on ws://localhost:{WS_PORT}")
         if args.mock:
