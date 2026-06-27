@@ -17,12 +17,19 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-html, body {
+/* The document element is the vertical scroller (camera follow uses
+   window.scrollTo). Keep overflow-x clipping on <html> only — putting it on
+   <body> would promote body's overflow-y to `auto`, making body the scroller
+   and silently breaking window-level scrolling. */
+html {
   height: 100%;
+  overflow-x: hidden;
+}
+body {
+  min-height: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-  overflow-x: hidden;
   cursor: none;                 /* 10-foot UI: no cursor */
   user-select: none;
 }
@@ -195,7 +202,8 @@ html, body {
 .screen {
   transition: opacity .3s var(--ease);
 }
-.screen.hidden {
+.screen.hidden,
+.keyboard.hidden {
   display: none;
 }
 .screen.fade-out {

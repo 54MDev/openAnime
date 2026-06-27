@@ -617,11 +617,9 @@ function handleCommand(cmd) {
       else if (cmd === "LEFT")  kbMove(0, -1);
       else if (cmd === "RIGHT") kbMove(0, 1);
       else if (cmd === "OK")    kbSelect();
-      else if (cmd === "BACK") {
-        // BACK deletes a character; on an empty query it closes the keyboard.
-        if (query) { query = query.slice(0, -1); updateQueryDisplay(); scheduleLiveSearch(); }
-        else closeKeyboard();
-      }
+      // BACK exits the keyboard back to the home search bar. Use the on-screen
+      // "del" key to delete a single character.
+      else if (cmd === "BACK")  closeKeyboard();
       break;
   }
 }
