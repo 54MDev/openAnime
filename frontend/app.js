@@ -19,6 +19,7 @@
 
 const WS_URL = `ws://${location.hostname || "localhost"}:8765`;
 const PLAY_URL = `http://${location.hostname || "localhost"}:8080/play`;
+const STOP_URL = `http://${location.hostname || "localhost"}:8080/stop`;
 const ANILIST_URL = "https://graphql.anilist.co";
 
 // ---- DOM handles ----
@@ -46,7 +47,7 @@ const els = {
 };
 
 // ---- Screen state ----
-// "home" | "detail" | "keyboard"
+// "home" | "detail" | "keyboard" | "playing"
 let screen = "home";
 
 // The original catalog, so BACK can restore it after a search replaces the
@@ -557,22 +558,57 @@ function restoreHome() {
 }
 
 // =====================================================================
-// Playback (placeholder until M4 swaps in the real scraper)
+// Playback
+//
+// POST /play is a long-lived request: the backend resolves the stream, launches
+// mpv over the browser, and only responds once mpv exits. So while we're
+// awaiting that fetch we're in the "playing" screen; BACK posts /stop, which
+// makes the backend quit mpv and the /play fetch resolve. The overlay sits
+// under mpv the whole time, so it's just there for the brief loading window and
+// for surfacing errors.
 // =====================================================================
 
 function playEpisode(media, episode) {
   const title = titleOf(media);
+  screen = "playing";
   showOverlay(`Loading ${title} — Episode ${episode}…`);
+
   fetch(PLAY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // The scraper (M4) resolves "<title> episode N" to a real stream URL.
+    // The backend scraper resolves "<title> episode N" to a real stream URL.
     body: JSON.stringify({ id: media.id, title, episode, query: `${title} episode ${episode}` }),
   })
-    .then(async (res) => console.log("POST /play ->", res.status, await res.text().catch(() => "")))
-    .catch((err) => console.error("POST /play failed:", err));
-  // Placeholder: no real playback yet (M4). Drop the overlay shortly.
-  setTimeout(hideOverlay, 1200);
+    .then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      console.log("POST /play ->", res.status, data);
+      if (!res.ok || data.status === "error") {
+        const msg = data.error || `playback failed (${res.status})`;
+        showOverlay(`Couldn't play ${title} — ${msg}`);
+        setTimeout(endPlayback, 3000);
+      } else {
+        endPlayback(); // mpv exited or was stopped
+      }
+    })
+    .catch((err) => {
+      console.error("POST /play failed:", err);
+      showOverlay("Couldn't reach the backend.");
+      setTimeout(endPlayback, 3000);
+    });
+}
+
+// BACK during playback: ask the backend to quit mpv. The /play fetch above then
+// resolves and calls endPlayback() — we don't tear down the screen here.
+function stopPlayback() {
+  showOverlay("Stopping…");
+  fetch(STOP_URL, { method: "POST" }).catch((err) =>
+    console.error("POST /stop failed:", err)
+  );
+}
+
+function endPlayback() {
+  hideOverlay();
+  screen = "detail";
 }
 
 function showOverlay(text) {
@@ -598,7 +634,14 @@ function crossFade(from, to) {
 // =====================================================================
 
 function handleCommand(cmd) {
-  // If the loading overlay is up, BACK always dismisses it first.
+  // During playback the only input that matters is BACK -> stop mpv. Everything
+  // else (including the overlay-dismiss shortcut below) is ignored.
+  if (screen === "playing") {
+    if (cmd === "BACK") stopPlayback();
+    return;
+  }
+
+  // Outside playback, BACK dismisses a lingering overlay (e.g. an error) first.
   if (cmd === "BACK" && !els.overlay.classList.contains("hidden")) {
     hideOverlay();
     return;

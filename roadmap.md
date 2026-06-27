@@ -45,14 +45,18 @@ Five milestones, each independently testable before moving to the next. Never mo
 ## Milestone 4 — Stream Extraction & Playback
 **Goal:** Select an anime episode → video plays fullscreen via mpv with audio.
 
-- [ ] Write `backend/scraper.py` as a thin `yt-dlp` subprocess wrapper
-- [ ] Test yt-dlp against animepahe, anikoto, and reanime manually from the terminal
-- [ ] Wire `/play` endpoint to call scraper and launch `mpv --fullscreen --ontop`
-- [ ] Verify Chromium suspends cleanly while mpv plays
-- [ ] Verify mpv exit returns focus to the browser UI
-- [ ] Confirm audio plays through USB audio adapter (ALSA device)
+- [x] Write `backend/scraper.py` (yt-dlp wrapper: anikoto search → watch page → `.m3u8` + referer/UA headers)
+- [x] Test yt-dlp against the source — animepahe & AllAnime are Cloudflare-challenge-blocked; **anikoto.cz works** headlessly via a vendored, patched `yt-dlp-anikoto` plugin (`backend/plugins/`). Verified on dev machine: search match, m3u8 extraction, playlist + real MPEG-TS segments fetch with referer.
+- [x] Wire `/play` to call scraper and launch `mpv --fullscreen --ontop` (forwarding `--referrer`/`--user-agent`); add `/stop` for BACK during playback
+- [ ] Verify Chromium suspends cleanly while mpv plays (on hardware)
+- [ ] Verify mpv exit returns focus to the browser UI (on hardware)
+- [ ] Confirm audio plays through USB audio adapter (ALSA device) (on hardware)
 
 **Done when:** End-to-end flow works: browse → select episode → video plays with audio → exit returns to UI.
+
+**Note:** Extraction + the full HTTP/play/stop wiring are verified on the dev
+machine (real network, fake mpv). The remaining boxes need the actual Uno Q
+(mpv playback, Chromium hide/restore via wmctrl, USB audio).
 
 ---
 

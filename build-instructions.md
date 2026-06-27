@@ -116,11 +116,29 @@ sudo apt install -y python3-msgpack python3-websockets
 ```bash
 sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
 sudo chmod a+rx /usr/local/bin/yt-dlp
+yt-dlp --version   # must be >= 2025.12.08 (the vendored anikoto plugin needs it)
 ```
 
 Keep yt-dlp updated regularly — streaming sites change often:
 ```bash
 yt-dlp -U
+```
+
+**Source site & extractor plugin.** Stream extraction uses **anikoto.cz** via a
+vendored, patched yt-dlp extractor plugin in `backend/plugins/`. The backend
+passes `--plugin-dirs backend/plugins` to yt-dlp automatically, so there is
+**nothing extra to install** — just clone the repo. We do *not* use animepahe or
+AllAnime: both now sit behind Cloudflare interactive ("Just a moment…")
+challenges that no headless tool, yt-dlp included, can pass. anikoto runs
+Cloudflare in plain CDN mode and is reachable headlessly. See
+`backend/plugins/yt-dlp-anikoto/PATCHES.md` for what was fixed and how to
+re-verify after a site change.
+
+Quick manual check (Roadmap M4):
+```bash
+cd /home/user/openAnime
+python3 backend/scraper.py --title "Frieren" --episode 1
+# prints the source watch page + required headers to stderr, the .m3u8 to stdout
 ```
 
 ---
@@ -262,7 +280,8 @@ The TV should show the openAnime UI within ~30 seconds of powering on, with no k
 | Chromium won't open | Backend not ready yet | Increase `sleep 3` in Openbox autostart to `sleep 8` |
 | No audio | Wrong ALSA card number | Re-run `aplay -l` and update `/etc/asound.conf` |
 | Audio cuts out | Known Uno Q USB driver bug | Switch to Bluetooth speaker or USB hub with powered ports |
-| yt-dlp fails | Site changed structure | Run `yt-dlp -U` to update, then retry |
+| yt-dlp fails / no formats | Site or player host changed | `yt-dlp -U`; test `python3 backend/scraper.py --title "X" --episode 1`; if the player host rotated, update `backend/plugins/yt-dlp-anikoto` (see its PATCHES.md) |
+| Playback 403s in mpv | Referer/UA not forwarded | Confirm `scraper.py` prints `headers:` with a `Referer`; app.py passes it to mpv as `--referrer` |
 | mpv won't go fullscreen over Chromium | wmctrl not installed | `sudo apt install wmctrl` |
 | Black screen on boot | LightDM autologin misconfigured | SSH in and check `sudo systemctl status lightdm` |
 
