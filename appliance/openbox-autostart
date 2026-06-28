@@ -13,6 +13,10 @@ xset s off
 xset -dpms
 xset s noblank
 
+# Let the openanime systemd service (running as this same user, but outside the
+# X session) open this display so mpv can play fullscreen. Local-user only.
+xhost +SI:localuser:"$USER"
+
 # Give the systemd backend a moment to bind :8080 before Chromium loads it.
 # Bump this to 8 if you ever see Chromium open on an error page at cold boot.
 sleep 3
