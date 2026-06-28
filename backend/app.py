@@ -27,6 +27,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import websockets
@@ -59,6 +60,17 @@ BROWSER_WINDOW = os.environ.get("OPENANIME_BROWSER", "Chromium")
 MPV_IPC_SOCKET = os.environ.get("OPENANIME_MPV_IPC", "/tmp/openanime-mpv.sock")
 SEEK_STEP = int(os.environ.get("OPENANIME_SEEK_STEP", "10"))
 
+# Progress tracking (M7A). Persisted outside the repo so `git pull` OTA stays
+# clean. Keyed by "<anilistId>:<episode>".
+DATA_DIR = Path(os.environ.get("OPENANIME_DATA_DIR",
+                               Path.home() / ".local/share/openanime"))
+PROGRESS_FILE = DATA_DIR / "progress.json"
+POLL_SECS = float(os.environ.get("OPENANIME_POLL_SECS", "5"))
+COMPLETE_PCT = float(os.environ.get("OPENANIME_COMPLETE_PCT", "0.90"))
+# Don't auto-resume from a trivial start, and don't resume right at the end.
+RESUME_FLOOR_SECS = 15.0
+RESUME_TAIL_SECS = 30.0
+
 # MessagePack-RPC message type codes
 REQUEST, RESPONSE, NOTIFICATION = 0, 1, 2
 
@@ -89,6 +101,48 @@ def broadcast(command):
 
 
 # =====================================================================
+# Progress store (M7A): persist how far the viewer got in each episode, keyed
+# by "<anilistId>:<episode>". Read in full on each request; written atomically
+# under a lock so a crash mid-write can't corrupt the file.
+# =====================================================================
+
+_progress_lock = threading.Lock()
+
+
+def _progress_key(anilist_id, episode):
+    return f"{anilist_id}:{episode}"
+
+
+def load_progress():
+    """Return the whole progress map (empty dict if the file is missing/bad)."""
+    try:
+        with open(PROGRESS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    except OSError as e:
+        print(f"[progress] read failed: {e}", file=sys.stderr)
+        return {}
+
+
+def save_progress_record(record):
+    """Merge one episode record into the store (atomic write under the lock)."""
+    key = _progress_key(record["anilistId"], record["episode"])
+    with _progress_lock:
+        store = load_progress()
+        store[key] = record
+        try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            tmp = PROGRESS_FILE.with_suffix(".json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(store, f)
+            os.replace(tmp, PROGRESS_FILE)
+        except OSError as e:
+            print(f"[progress] write failed: {e}", file=sys.stderr)
+
+
+# =====================================================================
 # Playback: resolve a stream, launch mpv over the browser, restore on exit.
 #
 # Each /play request runs on its own ThreadingHTTPServer thread and blocks for
@@ -112,7 +166,66 @@ def _wmctrl(state):
         print(f"[play] wmctrl {state} failed: {e}", file=sys.stderr)
 
 
-def play_blocking(stream, title, episode):
+def _resume_position(anilist_id, episode):
+    """Saved position to resume from, or None to start at 0 (M7A).
+
+    Skips trivial starts (< floor) and near-finished episodes (within the tail
+    or already marked completed) so replay starts clean in those cases.
+    """
+    if anilist_id is None:
+        return None
+    record = load_progress().get(_progress_key(anilist_id, episode))
+    if not record or record.get("completed"):
+        return None
+    pos = record.get("position") or 0
+    dur = record.get("duration") or 0
+    if pos < RESUME_FLOOR_SECS:
+        return None
+    if dur and pos > dur - RESUME_TAIL_SECS:
+        return None
+    return pos
+
+
+def _poll_progress(proc, anilist_id, episode, title, audio, media):
+    """Poll mpv's position while it plays; persist the final snapshot on exit.
+
+    Runs on its own daemon thread. Keeps the latest (position, duration) and
+    writes one record after mpv exits — covering BACK/stop, remote-quit, and
+    natural end-of-file uniformly. No-op when we have nothing to key on.
+    """
+    if anilist_id is None:
+        return
+    last_pos = 0.0
+    last_dur = 0.0
+    while proc.poll() is None:
+        pos = _mpv_get("time-pos")
+        dur = _mpv_get("duration")
+        if isinstance(pos, (int, float)):
+            last_pos = float(pos)
+        if isinstance(dur, (int, float)) and dur > 0:
+            last_dur = float(dur)
+        time.sleep(POLL_SECS)
+
+    if last_pos <= 0:
+        return  # never got a reading (e.g. mpv failed to start playback)
+    percent = (last_pos / last_dur) if last_dur else 0.0
+    save_progress_record({
+        "anilistId": anilist_id,
+        "episode": episode,
+        "position": round(last_pos, 1),
+        "duration": round(last_dur, 1),
+        "percent": round(percent, 4),
+        "completed": percent >= COMPLETE_PCT,
+        "updatedAt": int(time.time()),
+        "title": title,
+        "audio": audio,
+        "media": media,
+    })
+    print(f"[progress] saved {title} ep {episode}: "
+          f"{last_pos:.0f}/{last_dur:.0f}s ({percent:.0%})")
+
+
+def play_blocking(stream, title, episode, anilist_id=None, media=None, audio="sub"):
     """Launch mpv and block until it exits. Returns a status dict for the UI.
 
     `stream` is a scraper.Stream (url + http_headers). The extracted .m3u8 is
@@ -123,6 +236,11 @@ def play_blocking(stream, title, episode):
     cmd = [MPV_BIN, "--fullscreen", "--ontop", "--no-terminal", "--really-quiet",
            f"--input-ipc-server={MPV_IPC_SOCKET}",
            f"--force-media-title={title} — Episode {episode}"]
+    # Resume where the viewer left off (M7A), if there's saved unfinished progress.
+    resume = _resume_position(anilist_id, episode)
+    if resume:
+        cmd.append(f"--start={resume:.1f}")
+        print(f"[play] resuming {title} ep {episode} at {resume:.0f}s")
     if AUDIO_DEVICE:
         cmd.append(f"--audio-device={AUDIO_DEVICE}")
     # Forward the gating headers. (Only referer + UA; other headers like Accept
@@ -150,7 +268,14 @@ def play_blocking(stream, title, episode):
         proc = _mpv_proc
 
     print(f"[play] mpv started: {title} ep {episode}")
+    # Track position over the IPC socket and persist it when mpv exits (M7A).
+    poller = threading.Thread(
+        target=_poll_progress,
+        args=(proc, anilist_id, episode, title, audio, media),
+        daemon=True)
+    poller.start()
     rc = proc.wait()  # blocks here for the whole session (lock released)
+    poller.join(timeout=POLL_SECS + 3)  # let it write the final snapshot
 
     with _play_lock:
         if _mpv_proc is proc:
@@ -192,6 +317,53 @@ def _mpv_ipc(command):
         return False
 
 
+_ipc_request_id = 0
+
+
+def _mpv_get(prop):
+    """Read one mpv property over IPC (get_property). Returns the value or None.
+
+    Unlike _mpv_ipc (write-only), this waits for the matching response, skipping
+    the unsolicited `event` messages mpv interleaves on the same socket. Returns
+    None when idle, on error, or when the property is unavailable (e.g. time-pos
+    before the first frame decodes).
+    """
+    global _ipc_request_id
+    with _play_lock:
+        live = _mpv_proc is not None and _mpv_proc.poll() is None
+    if not live:
+        return None
+    _ipc_request_id += 1
+    req_id = _ipc_request_id
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2)
+            sock.connect(MPV_IPC_SOCKET)
+            cmd = {"command": ["get_property", prop], "request_id": req_id}
+            sock.sendall((json.dumps(cmd) + "\n").encode())
+            buf = b""
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    return None
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    if not line.strip():
+                        continue
+                    try:
+                        msg = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if msg.get("request_id") == req_id:
+                        if msg.get("error") == "success":
+                            return msg.get("data")
+                        return None
+    except OSError as e:
+        print(f"[play] mpv get {prop} failed: {e}", file=sys.stderr)
+        return None
+
+
 def toggle_pause():
     """Flip pause/play and flash mpv's OSD progress bar."""
     if not _mpv_ipc(["cycle", "pause"]):
@@ -218,6 +390,13 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(FRONTEND_DIR), **kwargs)
+
+    def do_GET(self):
+        # M7A: serve the progress map as JSON; everything else is a static file.
+        if self.path.rstrip("/") == "/progress":
+            self._json(200, load_progress())
+            return
+        super().do_GET()
 
     def do_POST(self):
         path = self.path.rstrip("/")
@@ -262,6 +441,10 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
         title = payload.get("title") or "Unknown"
         episode = payload.get("episode", 1)
         audio = payload.get("audio", "sub")  # "sub" | "dub"
+        # M7A: AniList id keys the progress store; `media` is a lightweight
+        # snapshot the home/detail UI can re-render from (used by Continue Watching).
+        anilist_id = payload.get("anilistId", payload.get("id"))
+        media = payload.get("media")
         # A direct watch URL may be passed via "url" for manual testing; normally
         # we search by the bare title (the episode number is selected separately).
         target = payload.get("url")
@@ -275,7 +458,8 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
             return
 
         print(f"[play] resolved -> {stream.page}")
-        result = play_blocking(stream, title, episode)
+        result = play_blocking(stream, title, episode,
+                               anilist_id=anilist_id, media=media, audio=audio)
         code = 200 if result.get("status") in ("ended", "busy") else 502
         self._json(code, result)
 
