@@ -20,6 +20,9 @@
 const WS_URL = `ws://${location.hostname || "localhost"}:8765`;
 const PLAY_URL = `http://${location.hostname || "localhost"}:8080/play`;
 const STOP_URL = `http://${location.hostname || "localhost"}:8080/stop`;
+const PAUSE_URL = `http://${location.hostname || "localhost"}:8080/pause`;
+const SEEK_URL = `http://${location.hostname || "localhost"}:8080/seek`;
+const SEEK_STEP = 10; // seconds per LEFT/RIGHT seek (backend has its own default)
 const ANILIST_URL = "https://graphql.anilist.co";
 
 // ---- DOM handles ----
@@ -649,6 +652,23 @@ function stopPlayback() {
   );
 }
 
+// In-player controls (M6). mpv owns the on-screen progress bar; these just nudge
+// it over the IPC socket. Chromium is hidden during playback, so there's nothing
+// to draw here — fire and forget.
+function togglePause() {
+  fetch(PAUSE_URL, { method: "POST" }).catch((err) =>
+    console.error("POST /pause failed:", err)
+  );
+}
+
+function seek(delta) {
+  fetch(SEEK_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ delta }),
+  }).catch((err) => console.error("POST /seek failed:", err));
+}
+
 function endPlayback() {
   hideOverlay();
   screen = "detail";
@@ -677,10 +697,14 @@ function crossFade(from, to) {
 // =====================================================================
 
 function handleCommand(cmd) {
-  // During playback the only input that matters is BACK -> stop mpv. Everything
-  // else (including the overlay-dismiss shortcut below) is ignored.
+  // During playback the remote drives mpv: BACK stops, OK pauses/resumes,
+  // LEFT/RIGHT seek ±10 s. UP/DOWN are reserved (unused). Handled before the
+  // overlay-dismiss shortcut so BACK can't be swallowed.
   if (screen === "playing") {
     if (cmd === "BACK") stopPlayback();
+    else if (cmd === "OK") togglePause();
+    else if (cmd === "LEFT") seek(-SEEK_STEP);
+    else if (cmd === "RIGHT") seek(SEEK_STEP);
     return;
   }
 

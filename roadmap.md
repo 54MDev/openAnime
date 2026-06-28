@@ -2,7 +2,7 @@
 
 ## Overview
 
-Five milestones, each independently testable before moving to the next. Never move to the next milestone until the current one is verified working.
+Six milestones, each independently testable before moving to the next. Never move to the next milestone until the current one is verified working. (M1–M5 are the original MVP; M6 is a post-MVP expansion adding in-player playback controls.)
 
 ---
 
@@ -76,6 +76,47 @@ machine (real network, fake mpv). The remaining boxes need the actual Uno Q
 **✅ COMPLETE (verified on hardware 2026-06-27).** Appliance files self-install
 via `sudo bash scripts/install-appliance.sh` (idempotent); cold boot lands on the
 UI with no keyboard. All five milestones done.
+
+---
+
+## Milestone 6 — In-Player Playback Controls
+**Goal:** While an episode is playing, the remote can pause/resume, seek ±10 seconds, and a progress bar shows position — all on-screen, no keyboard.
+
+### Scope (decided)
+- **OK** → pause / play toggle.
+- **LEFT** → seek −10 s, **RIGHT** → seek +10 s.
+- **BACK** → stop (unchanged from M4/M5).
+- **UP / DOWN** → intentionally unused for now (reserved; possible future volume control). Out of scope: skip-intro, next/previous-episode.
+- **Progress bar** → mpv's built-in OSD bar, flashed on pause/seek, auto-hides after a couple seconds. No custom UI.
+
+### Why mpv owns the controls (read before implementing)
+During playback Chromium is **hidden** (`wmctrl -r Chromium -b add,hidden` in [backend/app.py](backend/app.py) `play_blocking`), so the frontend cannot draw over the video. The controls and progress bar therefore come from **mpv itself**, driven over mpv's JSON IPC socket. The remote → backend → mpv path is:
+`IR command → app.py broadcast → WebSocket → app.js (playing screen) → POST to backend → backend writes JSON to mpv's IPC socket.`
+This mirrors how BACK→`/stop` already works today; pause/seek are the same pattern with new endpoints.
+
+### Implementation notes for the next session
+- **Launch flag:** add `--input-ipc-server=<socket>` to the mpv command in `play_blocking`. Put the socket under the runtime dir, e.g. `/run/user/<uid>/openanime-mpv.sock` (or `/tmp/openanime-mpv.sock`). Store the path so the control handlers can reach it; mpv creates the socket on launch, so it exists by the time any control request arrives (the long-lived `/play` request is already running by then).
+- **Backend IPC helper:** small function that opens the IPC socket and writes one newline-terminated JSON command. Guard it the same way `stop_playback()` is — no-op (return "idle") when `_mpv_proc` is None / not running. IPC writes are independent of `_play_lock` (they don't touch `_mpv_proc` lifecycle), but read `_mpv_proc` under the lock to check liveness.
+  - Pause toggle: `{"command":["cycle","pause"]}`
+  - Seek: `{"command":["seek", 10]}` / `{"command":["seek", -10]}` (relative)
+  - Flash the bar after each action: `{"command":["show-progress"]}` (mpv's OSD bar also auto-shows on seek; `show-progress` covers the pause case and gives consistent feedback).
+- **New HTTP endpoints** in `FrontendHandler.do_POST` alongside `/play` and `/stop`:
+  - `POST /pause` → toggle, return `{"status":"toggled"|"idle"}`
+  - `POST /seek` with body `{"delta": 10}` (or `-10`) → return `{"status":"seeking"|"idle"}`
+  - Keep them tiny and non-blocking (unlike `/play`, these return immediately).
+- **Frontend** [frontend/app.js](frontend/app.js): the playing-screen branch currently handles only `BACK → stopPlayback()` (it's handled first so overlay-dismiss can't swallow it). Add in that same branch: `OK → POST /pause`, `LEFT → POST /seek {-10}`, `RIGHT → POST /seek {+10}`. Reuse the existing `STOP_URL` host pattern for the new URLs. No new screen state needed — still `screen === "playing"`.
+- **Env knobs:** follow the existing convention — e.g. `OPENANIME_MPV_IPC` for the socket path, optionally `OPENANIME_SEEK_STEP` (default 10) so the seek amount is tunable without code changes.
+- **Don't break:** the long-lived blocking `/play` request and its `wmctrl` hide/restore must be untouched. Pause via IPC does not affect `proc.wait()`. The `_mpv_proc`/`_play_lock` invariants stay as-is.
+
+### Tasks
+- [x] Add `--input-ipc-server` to the mpv launch; store/derive the socket path — `OPENANIME_MPV_IPC` (default `/tmp/openanime-mpv.sock`)
+- [x] Backend IPC helper (open socket, send JSON, no-op when idle) — `_mpv_ipc()` + `toggle_pause()` / `seek_relative()` in [backend/app.py](backend/app.py)
+- [x] `POST /pause` and `POST /seek` endpoints
+- [x] Map OK/LEFT/RIGHT in app.js's playing-screen input branch
+- [x] Dev-machine test with real mpv (a local file): verify pause, seek both directions, progress bar appears and auto-hides — pause toggles, seek exactly ±10 s on a seekable file, idle no-ops return `idle`
+- [ ] On-hardware test via the remote: pause/resume, ±10 s seek, BACK still stops cleanly
+
+**Done when:** During an episode, the remote pauses/resumes with on-screen feedback, LEFT/RIGHT seek ±10 s with the progress bar flashing the new position, the bar auto-hides, and BACK still exits to the UI — all without a keyboard.
 
 ---
 
