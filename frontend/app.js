@@ -404,6 +404,12 @@ function updateDetailFocus(recomputeCols) {
       btn.classList.toggle("active", isPref);
       btn.classList.toggle("focused", detailZone === "toggle" && isPref);
     }
+    // The pill sits above the episode grid; when it's focused, scroll it into
+    // view (otherwise the episode-centering scroll leaves it off the top edge,
+    // which is invisible on a 16:9 TV even though it fits on a desktop window).
+    if (detailZone === "toggle") {
+      els.audioToggle.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
   } else if (detailZone === "toggle") {
     detailZone = "episodes"; // don't trap focus in a zone that isn't rendered
   }
