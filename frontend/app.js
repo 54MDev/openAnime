@@ -396,11 +396,16 @@ function makeEpisode(label, num) {
 
 function updateDetailFocus(recomputeCols) {
   // Sub/Dub pills: mark the chosen one active, and (when the toggle zone holds
-  // focus) ring it.
-  for (const btn of els.audioToggle.children) {
-    const isPref = btn.dataset.audio === audioPref;
-    btn.classList.toggle("active", isPref);
-    btn.classList.toggle("focused", detailZone === "toggle" && isPref);
+  // focus) ring it. Guard against the element missing (stale markup) so it can
+  // never break episode navigation.
+  if (els.audioToggle) {
+    for (const btn of els.audioToggle.children) {
+      const isPref = btn.dataset.audio === audioPref;
+      btn.classList.toggle("active", isPref);
+      btn.classList.toggle("focused", detailZone === "toggle" && isPref);
+    }
+  } else if (detailZone === "toggle") {
+    detailZone = "episodes"; // don't trap focus in a zone that isn't rendered
   }
 
   const items = els.episodes.children;
