@@ -126,6 +126,10 @@ def play_blocking(stream, title, episode):
             cmd.append(f"--referrer={value}")
         elif key.lower() == "user-agent":
             cmd.append(f"--user-agent={value}")
+    # External English subtitle for sub playback (loads + shows automatically).
+    # The .vtt is referer-gated too, but mpv applies --referrer to all requests.
+    if stream.subtitle:
+        cmd.append(f"--sub-file={stream.subtitle}")
     cmd.append(stream.url)
 
     with _play_lock:
@@ -192,13 +196,14 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
 
         title = payload.get("title") or "Unknown"
         episode = payload.get("episode", 1)
+        audio = payload.get("audio", "sub")  # "sub" | "dub"
         # A direct watch URL may be passed via "url" for manual testing; normally
         # we search by the bare title (the episode number is selected separately).
         target = payload.get("url")
-        print(f"[play] request: {title!r} ep {episode}")
+        print(f"[play] request: {title!r} ep {episode} ({audio})")
 
         try:
-            stream = scraper.get_stream_url(target, title=title, episode=episode)
+            stream = scraper.get_stream_url(target, title=title, episode=episode, audio=audio)
         except scraper.ScrapeError as e:
             print(f"[play] scrape failed: {e}", file=sys.stderr)
             self._json(502, {"status": "error", "error": str(e)})

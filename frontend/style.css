@@ -296,6 +296,35 @@ body {
   font-weight: 700;
 }
 
+/* Sub/Dub toggle: two pills above the episode grid. */
+.audio-toggle {
+  display: flex;
+  gap: 1vw;
+  margin-top: 3vh;
+}
+.audio-opt {
+  padding: .8vw 2.4vw;
+  border: .25vw solid transparent;
+  border-radius: 5vw;
+  background: var(--bg-elevated);
+  color: var(--text-dim, #9aa);
+  font-size: 1.3vw;
+  font-weight: 700;
+  font-family: inherit;
+  letter-spacing: .1vw;
+  cursor: none;
+  transition: transform .25s var(--ease), border-color .25s var(--ease),
+              background .25s var(--ease), color .25s var(--ease);
+}
+.audio-opt.active {
+  background: linear-gradient(135deg, var(--accent), #3a5fd0);
+  color: #fff;
+}
+.audio-opt.focused {
+  transform: scale(1.08);
+  border-color: var(--focus);
+}
+
 /* Episode grid: wraps into rows; d-pad navigates 2D. */
 .episodes {
   display: flex;
