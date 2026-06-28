@@ -17,6 +17,7 @@ set -euo pipefail
 APP_USER="${APP_USER:-user}"
 REPO_DIR="${REPO_DIR:-/home/${APP_USER}/openAnime}"
 USER_HOME="$(getent passwd "${APP_USER}" | cut -d: -f6)"
+APP_UID="$(id -u "${APP_USER}")"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "error: run as root (sudo bash scripts/install-appliance.sh)" >&2
@@ -46,6 +47,7 @@ echo "==> Installing systemd service (user=${APP_USER}, repo=${REPO_DIR})"
 # Render the unit with the real user/path rather than the hardcoded defaults.
 sed -e "s#User=user#User=${APP_USER}#" \
     -e "s#/home/user/openAnime#${REPO_DIR}#g" \
+    -e "s#/run/user/1000#/run/user/${APP_UID}#g" \
     "${REPO_DIR}/systemd/openanime.service" > /etc/systemd/system/openanime.service
 systemctl daemon-reload
 systemctl enable openanime

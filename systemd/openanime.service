@@ -15,6 +15,11 @@ Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 # that owns the Openbox session; the autostart grants it access (xhost), so
 # pointing at :0 is enough -- no XAUTHORITY juggling.
 Environment=DISPLAY=:0
+# mpv's --ao=pulse needs the user's PipeWire/Pulse socket, which lives under
+# XDG_RUNTIME_DIR. A system service doesn't set this, so without it audio is
+# silent even though the BT speaker is connected. Assumes uid 1000 (the login
+# user); the installer rewrites it to the real uid.
+Environment=XDG_RUNTIME_DIR=/run/user/1000
 ExecStart=/usr/bin/python3 /home/user/openAnime/backend/app.py
 # Streaming sites need outbound DNS/HTTPS; nothing here listens before the
 # socket exists, and router_reader() already retries if the socket is late.
