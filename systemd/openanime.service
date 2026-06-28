@@ -8,6 +8,13 @@ Wants=network-online.target
 Type=simple
 User=user
 WorkingDirectory=/home/user/openAnime
+# A system service's default PATH omits /usr/local/bin, where yt-dlp installs --
+# without this the scraper's `yt-dlp` call fails and /play hangs/errors.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+# mpv and wmctrl need the X session's display. The service runs as the same user
+# that owns the Openbox session; the autostart grants it access (xhost), so
+# pointing at :0 is enough -- no XAUTHORITY juggling.
+Environment=DISPLAY=:0
 ExecStart=/usr/bin/python3 /home/user/openAnime/backend/app.py
 # Streaming sites need outbound DNS/HTTPS; nothing here listens before the
 # socket exists, and router_reader() already retries if the socket is late.

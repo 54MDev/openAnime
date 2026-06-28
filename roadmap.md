@@ -67,15 +67,15 @@ machine (real network, fake mpv). The remaining boxes need the actual Uno Q
 - [x] Write autostart entry for Openbox to launch Chromium kiosk on boot — `appliance/openbox-autostart`
 - [x] Configure Debian to boot to X11 + Openbox without login prompt (autologin) — via `scripts/install-appliance.sh` (LightDM `conf.d` drop-in)
 - [x] Hide cursor (`unclutter` package) — `unclutter -idle 0` in autostart
-- [ ] Test cold boot → UI ready time; target under 30 seconds *(needs hardware)*
+- [x] Test cold boot → UI ready time; target under 30 seconds — verified on hardware
 - [x] Disable screen blanking / DPMS — `xset s off / -dpms / s noblank` in autostart
 - [x] Add BACK button handler to close mpv and return to UI — `frontend/app.js` posts `/stop` on BACK during playback
 
 **Done when:** Power on the Uno Q → TV shows the UI within 30 seconds, no keyboard or mouse ever touched.
 
-**Note:** All appliance files are authored and self-install via
-`sudo bash scripts/install-appliance.sh` (idempotent). The one remaining box —
-cold-boot timing — can only be verified on the actual Uno Q.
+**✅ COMPLETE (verified on hardware 2026-06-27).** Appliance files self-install
+via `sudo bash scripts/install-appliance.sh` (idempotent); cold boot lands on the
+UI with no keyboard. All five milestones done.
 
 ---
 
