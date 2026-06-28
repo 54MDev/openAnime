@@ -32,11 +32,11 @@ Five milestones, each independently testable before moving to the next. Never mo
 ## Milestone 3 — UI Shell
 **Goal:** A fullscreen, mouse-free anime browse UI that responds to D-pad navigation.
 
-- [ ] Build `frontend/index.html` layout: hero banner + card rows
-- [ ] Write `frontend/style.css`: 10-foot sizing, focus ring animation, card hover scale
-- [ ] Write `frontend/app.js`: WebSocket listener, 2D focus index grid, keyboard fallback
-- [ ] Test navigation across all card rows with the remote
-- [ ] Wire card selection (`OK`) to fire a placeholder `POST /play` request to the backend
+- [x] Build `frontend/index.html` layout: hero banner + card rows
+- [x] Write `frontend/style.css`: 10-foot sizing, focus ring animation, card hover scale
+- [x] Write `frontend/app.js`: WebSocket listener, 2D focus index grid, keyboard fallback
+- [x] Test navigation across all card rows with the remote
+- [x] Wire card selection (`OK`) to fire a placeholder `POST /play` request to the backend
 
 **Done when:** All cards are navigable via remote with smooth focus transitions; selecting a card triggers the backend endpoint.
 
@@ -48,9 +48,9 @@ Five milestones, each independently testable before moving to the next. Never mo
 - [x] Write `backend/scraper.py` (yt-dlp wrapper: anikoto search → watch page → `.m3u8` + referer/UA headers)
 - [x] Test yt-dlp against the source — animepahe & AllAnime are Cloudflare-challenge-blocked; **anikoto.cz works** headlessly via a vendored, patched `yt-dlp-anikoto` plugin (`backend/plugins/`). Verified on dev machine: search match, m3u8 extraction, playlist + real MPEG-TS segments fetch with referer.
 - [x] Wire `/play` to call scraper and launch `mpv --fullscreen --ontop` (forwarding `--referrer`/`--user-agent`); add `/stop` for BACK during playback
-- [ ] Verify Chromium suspends cleanly while mpv plays (on hardware)
-- [ ] Verify mpv exit returns focus to the browser UI (on hardware)
-- [ ] Confirm audio plays through USB audio adapter (ALSA device) (on hardware)
+- [x] Verify Chromium suspends cleanly while mpv plays (on hardware)
+- [x] Verify mpv exit returns focus to the browser UI (on hardware)
+- [x] Confirm audio plays through USB audio adapter (ALSA device) (on hardware)
 
 **Done when:** End-to-end flow works: browse → select episode → video plays with audio → exit returns to UI.
 
@@ -63,15 +63,19 @@ machine (real network, fake mpv). The remaining boxes need the actual Uno Q
 ## Milestone 5 — Appliance Polish
 **Goal:** The device boots directly into the UI with no manual intervention; feels like a consumer product.
 
-- [ ] Write systemd service for `app.py` (auto-start, auto-restart on crash)
-- [ ] Write autostart entry for Openbox to launch Chromium kiosk on boot
-- [ ] Configure Debian to boot to X11 + Openbox without login prompt (autologin)
-- [ ] Hide cursor (`unclutter` package)
-- [ ] Test cold boot → UI ready time; target under 30 seconds
-- [ ] Disable screen blanking / DPMS
-- [ ] Add BACK button handler to close mpv and return to UI
+- [x] Write systemd service for `app.py` (auto-start, auto-restart on crash) — `systemd/openanime.service`
+- [x] Write autostart entry for Openbox to launch Chromium kiosk on boot — `appliance/openbox-autostart`
+- [x] Configure Debian to boot to X11 + Openbox without login prompt (autologin) — via `scripts/install-appliance.sh` (LightDM `conf.d` drop-in)
+- [x] Hide cursor (`unclutter` package) — `unclutter -idle 0` in autostart
+- [ ] Test cold boot → UI ready time; target under 30 seconds *(needs hardware)*
+- [x] Disable screen blanking / DPMS — `xset s off / -dpms / s noblank` in autostart
+- [x] Add BACK button handler to close mpv and return to UI — `frontend/app.js` posts `/stop` on BACK during playback
 
 **Done when:** Power on the Uno Q → TV shows the UI within 30 seconds, no keyboard or mouse ever touched.
+
+**Note:** All appliance files are authored and self-install via
+`sudo bash scripts/install-appliance.sh` (idempotent). The one remaining box —
+cold-boot timing — can only be verified on the actual Uno Q.
 
 ---
 

@@ -219,7 +219,37 @@ sudo systemctl status openanime
 
 ## Phase 5: Configure Autoboot to UI
 
+### 5.0 Quick path (recommended): the installer script
+
+Everything in this phase (systemd service, Openbox autostart, LightDM autologin)
+is automated by one idempotent script — safe to re-run after a `git pull`:
+
+```bash
+cd /home/user/openAnime
+sudo bash scripts/install-appliance.sh
+sudo reboot
+```
+
+If your login user or repo path differ from the `user` / `/home/user/openAnime`
+defaults, override them:
+```bash
+APP_USER=pi REPO_DIR=/opt/openAnime sudo -E bash scripts/install-appliance.sh
+```
+
+The manual steps below (5.1–5.4) document exactly what the script does, in case
+you want to configure it by hand or troubleshoot.
+
 ### 5.1 Configure Openbox autostart
+
+The repo ships this file at `appliance/openbox-autostart`; copy it into place
+(the installer does this for you):
+
+```bash
+mkdir -p ~/.config/openbox
+cp ~/openAnime/appliance/openbox-autostart ~/.config/openbox/autostart
+```
+
+For reference, its contents are equivalent to:
 
 ```bash
 mkdir -p ~/.config/openbox
