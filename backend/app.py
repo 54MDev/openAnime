@@ -222,6 +222,9 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
+        # Never let the kiosk cache the UI — otherwise a `git pull` can leave the
+        # browser running a stale mix of old HTML + new JS until a hard reload.
+        self.send_header("Cache-Control", "no-store, must-revalidate")
         super().end_headers()
 
     def _json(self, code, obj):
