@@ -332,6 +332,7 @@ body {
   gap: 1.4vw;
 }
 .episode {
+  position: relative; /* anchors the M7A progress bar */
   flex: 0 0 14vw;
   height: 7vw;
   border: .25vw solid transparent;
@@ -342,7 +343,23 @@ body {
   font-weight: 600;
   font-family: inherit;
   cursor: none;
+  overflow: hidden; /* keep the bar within the rounded corners */
   transition: transform .25s var(--ease), border-color .25s var(--ease), background .25s var(--ease);
+}
+
+/* ---- Watch-progress bar (M7A): thin strip along the tile's bottom edge ---- */
+.ep-progress {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: .5vw;
+  background: rgba(255, 255, 255, .18);
+}
+.ep-progress-fill {
+  height: 100%;
+  background: var(--accent);
+}
+.ep-progress.completed .ep-progress-fill {
+  background: #4caf7d; /* watched = green */
 }
 .episodes.single .episode {
   flex-basis: 22vw;

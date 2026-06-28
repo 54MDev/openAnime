@@ -79,7 +79,7 @@ UI with no keyboard. All five milestones done.
 
 ---
 
-## Milestone 6 — In-Player Playback Controls
+## Milestone 6 — In-Player Playback Controls ✅ COMPLETE (verified on hardware)
 **Goal:** While an episode is playing, the remote can pause/resume, seek ±10 seconds, and a progress bar shows position — all on-screen, no keyboard.
 
 ### Scope (decided)
@@ -114,9 +114,45 @@ This mirrors how BACK→`/stop` already works today; pause/seek are the same pat
 - [x] `POST /pause` and `POST /seek` endpoints
 - [x] Map OK/LEFT/RIGHT in app.js's playing-screen input branch
 - [x] Dev-machine test with real mpv (a local file): verify pause, seek both directions, progress bar appears and auto-hides — pause toggles, seek exactly ±10 s on a seekable file, idle no-ops return `idle`
-- [ ] On-hardware test via the remote: pause/resume, ±10 s seek, BACK still stops cleanly
+- [x] On-hardware test via the remote: pause/resume, ±10 s seek, BACK still stops cleanly
 
 **Done when:** During an episode, the remote pauses/resumes with on-screen feedback, LEFT/RIGHT seek ±10 s with the progress bar flashing the new position, the bar auto-hides, and BACK still exits to the UI — all without a keyboard.
+
+**✅ COMPLETE (verified on hardware 2026-06-28).** OK pauses/resumes, LEFT/RIGHT
+seek ±10 s with mpv's OSD bar flashing the new position, and BACK still exits
+cleanly — all from the remote, no keyboard. All six milestones done.
+
+---
+
+## Milestone 7A — Episode Progress Tracking
+**Goal:** Every episode play records how far you got; the detail screen shows a
+progress bar under each episode tile, and replaying resumes where you stopped.
+
+Backend polls mpv's IPC socket for position during the long-lived `/play`
+session, persists per-episode progress (keyed by AniList id + episode) to a JSON
+store, and exposes `GET /progress`. Frontend draws a bar on each episode tile.
+
+**Full spec:** [milestone-7a.md](milestone-7a.md).
+
+**Status:** Built + dev-verified (real mpv on local clips: partial-watch
+persistence, completion threshold, and resume floor/mid/completed cases all
+pass). On-hardware remote test pending.
+
+---
+
+## Milestone 7B — Continue Watching Row
+**Goal:** The home screen shows a "Continue Watching" row first, listing series
+with an unfinished episode (most-recent first); selecting one opens its normal
+episode list — no re-searching.
+
+Builds on 7A: reads the progress store (which already stores a media snapshot
+per record), groups by series in the frontend, and prepends a row to the home
+catalog. Almost entirely frontend.
+
+**Full spec:** [milestone-7b.md](milestone-7b.md).
+
+**Status:** Built; grouping/filter logic dev-verified against the progress store.
+On-hardware remote test (browse → continue card → episode list) pending.
 
 ---
 

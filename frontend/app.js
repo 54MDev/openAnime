@@ -22,6 +22,7 @@ const PLAY_URL = `http://${location.hostname || "localhost"}:8080/play`;
 const STOP_URL = `http://${location.hostname || "localhost"}:8080/stop`;
 const PAUSE_URL = `http://${location.hostname || "localhost"}:8080/pause`;
 const SEEK_URL = `http://${location.hostname || "localhost"}:8080/seek`;
+const PROGRESS_URL = `http://${location.hostname || "localhost"}:8080/progress`;
 const SEEK_STEP = 10; // seconds per LEFT/RIGHT seek (backend has its own default)
 const ANILIST_URL = "https://graphql.anilist.co";
 
@@ -58,6 +59,13 @@ let screen = "home";
 // home rows with results. `showingResults` tracks whether results are up.
 let homeCatalog = null;
 let showingResults = false;
+
+// Episode progress (M7A/7B), keyed "<anilistId>:<episode>", fetched from the
+// backend. Drives the per-episode bars and the Continue Watching home row.
+// `progressDirty` flags that a session just ended, so returning home rebuilds
+// the Continue Watching row to surface the show that was just watched.
+let progressByKey = {};
+let progressDirty = false;
 
 // =====================================================================
 // Home focus state
@@ -158,6 +166,86 @@ function fallbackCatalog() {
     { title: "Popular This Season", media: make("Season") },
     { title: "All-Time Popular", media: make("Popular") },
   ];
+}
+
+// =====================================================================
+// Progress + Continue Watching (M7A / M7B)
+// =====================================================================
+
+// The compact media fields the home/detail UI re-renders from. Sent with /play
+// so the backend can store it; a Continue Watching card is rebuilt from this
+// (no extra AniList round-trip).
+function mediaSnapshot(media) {
+  return {
+    id: media.id,
+    title: media.title,
+    coverImage: media.coverImage,
+    bannerImage: media.bannerImage,
+    description: media.description,
+    episodes: media.episodes,
+    averageScore: media.averageScore,
+    genres: media.genres,
+  };
+}
+
+async function fetchProgress() {
+  try {
+    const res = await fetch(PROGRESS_URL);
+    if (res.ok) progressByKey = await res.json();
+  } catch (err) {
+    console.error("progress fetch failed:", err);
+  }
+}
+
+// A thin bar for an episode tile, or null when there's no saved progress.
+function episodeBar(mediaId, num) {
+  const rec = progressByKey[`${mediaId}:${num}`];
+  if (!rec) return null;
+  const pct = rec.completed ? 1 : Math.max(0, Math.min(1, rec.percent || 0));
+  const bar = document.createElement("div");
+  bar.className = "ep-progress" + (rec.completed ? " completed" : "");
+  const fill = document.createElement("div");
+  fill.className = "ep-progress-fill";
+  fill.style.width = `${pct * 100}%`;
+  bar.append(fill);
+  return bar;
+}
+
+// Refresh the bars on the already-rendered detail episode list (after a session
+// ends) without rebuilding the whole screen.
+function applyEpisodeProgress() {
+  if (!detailMedia) return;
+  for (const el of els.episodes.children) {
+    const num = parseInt(el.dataset.episode, 10);
+    el.querySelector(".ep-progress")?.remove();
+    const bar = episodeBar(detailMedia.id, num);
+    if (bar) el.append(bar);
+  }
+}
+
+// Collapse the progress store to one entry per series (newest in-progress
+// episode), most-recently-watched first. Returns a home-row object or null.
+function buildContinueRow() {
+  const bySeries = new Map(); // anilistId -> { media, updatedAt }
+  for (const rec of Object.values(progressByKey)) {
+    if (rec.completed || !rec.media) continue;
+    if (!(rec.percent > 0.02)) continue; // ignore trivial / accidental opens
+    const prev = bySeries.get(rec.anilistId);
+    if (!prev || rec.updatedAt > prev.updatedAt) {
+      bySeries.set(rec.anilistId, { media: rec.media, updatedAt: rec.updatedAt });
+    }
+  }
+  const entries = [...bySeries.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!entries.length) return null;
+  return { title: "Continue Watching", media: entries.map((e) => e.media) };
+}
+
+// Render the home screen: Continue Watching (when non-empty) ahead of the
+// AniList catalog rows.
+function renderHome() {
+  const rows = homeCatalog || fallbackCatalog();
+  const cont = buildContinueRow();
+  render(cont ? [cont, ...rows] : rows);
 }
 
 // =====================================================================
@@ -394,6 +482,10 @@ function makeEpisode(label, num) {
   el.className = "episode";
   el.textContent = label;
   el.dataset.episode = num;
+  // M7A: thin watch-progress bar along the bottom edge (detailMedia is set by
+  // openDetail before this runs).
+  const bar = episodeBar(detailMedia?.id, num);
+  if (bar) el.append(bar);
   return el;
 }
 
@@ -474,10 +566,16 @@ function detailSelect() {
 }
 
 function closeDetail() {
-  crossFade(els.detail, els.home);
   screen = "home";
-  // Restore the previously focused card; applyFocus() re-centers it.
-  applyFocus();
+  // If a session just ended, rebuild home so the watched show jumps to the top
+  // of Continue Watching; otherwise keep the previously focused card.
+  if (progressDirty) {
+    progressDirty = false;
+    renderHome(); // render() re-applies focus (resets to the first row)
+  } else {
+    applyFocus(); // restore the previously focused card; re-centers it
+  }
+  crossFade(els.detail, els.home);
 }
 
 // =====================================================================
@@ -600,7 +698,7 @@ async function runSearch({ keepKeyboard = false } = {}) {
 // Drop the search results and restore the original home catalog.
 function restoreHome() {
   showingResults = false;
-  render(homeCatalog || fallbackCatalog());
+  renderHome();
 }
 
 // =====================================================================
@@ -623,7 +721,12 @@ function playEpisode(media, episode) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     // The backend scraper resolves the title + episode to a real stream URL.
-    body: JSON.stringify({ id: media.id, title, episode, audio: audioPref }),
+    // anilistId keys the progress store; `media` is the snapshot Continue
+    // Watching rebuilds its card from.
+    body: JSON.stringify({
+      anilistId: media.id, title, episode, audio: audioPref,
+      media: mediaSnapshot(media),
+    }),
   })
     .then(async (res) => {
       const data = await res.json().catch(() => ({}));
@@ -669,9 +772,14 @@ function seek(delta) {
   }).catch((err) => console.error("POST /seek failed:", err));
 }
 
-function endPlayback() {
+async function endPlayback() {
   hideOverlay();
   screen = "detail";
+  // The session updated progress: refresh the store, repaint the detail bars,
+  // and flag home to rebuild its Continue Watching row on the way back.
+  progressDirty = true;
+  await fetchProgress();
+  applyEpisodeProgress();
 }
 
 function showOverlay(text) {
@@ -794,11 +902,12 @@ function connectWS() {
 
 (async function init() {
   connectWS();
+  await fetchProgress();
   try {
     homeCatalog = await fetchCatalog();
   } catch (err) {
     console.error("AniList fetch failed, using fallback:", err);
     homeCatalog = fallbackCatalog();
   }
-  render(homeCatalog);
+  renderHome();
 })();
