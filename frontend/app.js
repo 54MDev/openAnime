@@ -41,6 +41,7 @@ const els = {
   detailSub: document.getElementById("detail-sub"),
   detailDesc: document.getElementById("detail-desc"),
   episodes: document.getElementById("episodes"),
+  audioToggle: document.getElementById("audio-toggle"),
   keyboard: document.getElementById("keyboard"),
   kbQuery: document.getElementById("kb-query"),
   kbGrid: document.getElementById("kb-grid"),
@@ -342,6 +343,8 @@ function homeSelect() {
 let detailMedia = null;
 let epFocus = 0;
 let epCols = 1; // columns per row in the episode grid, for d-pad math
+let audioPref = "sub"; // "sub" | "dub" — sticky across shows
+let detailZone = "episodes"; // "toggle" (sub/dub pills) | "episodes"
 
 function openDetail(media) {
   detailMedia = media;
@@ -374,12 +377,13 @@ function openDetail(media) {
   }
 
   epFocus = 0;
+  detailZone = "episodes";
 
   // Cross-fade from home to detail first, so the episode grid is laid out
   // (visible) before we measure column count / scroll the focused entry.
   crossFade(els.home, els.detail);
   screen = "detail";
-  applyEpisodeFocus(true);
+  updateDetailFocus(true);
 }
 
 function makeEpisode(label, num) {
@@ -390,11 +394,20 @@ function makeEpisode(label, num) {
   return el;
 }
 
-function applyEpisodeFocus(recomputeCols) {
-  const items = els.episodes.children;
-  if (!items.length) return;
+function updateDetailFocus(recomputeCols) {
+  // Sub/Dub pills: mark the chosen one active, and (when the toggle zone holds
+  // focus) ring it.
+  for (const btn of els.audioToggle.children) {
+    const isPref = btn.dataset.audio === audioPref;
+    btn.classList.toggle("active", isPref);
+    btn.classList.toggle("focused", detailZone === "toggle" && isPref);
+  }
 
-  // Infer how many columns the flex/grid wrapped into, for UP/DOWN math.
+  const items = els.episodes.children;
+  for (const it of items) it.classList.remove("focused");
+  if (detailZone !== "episodes" || !items.length) return;
+
+  // Infer how many columns the flex grid wrapped into, for UP/DOWN math.
   if (recomputeCols) {
     const firstTop = items[0].offsetTop;
     epCols = 0;
@@ -406,21 +419,40 @@ function applyEpisodeFocus(recomputeCols) {
   }
 
   epFocus = clamp(epFocus, items.length - 1);
-  for (const it of items) it.classList.remove("focused");
   const cur = items[epFocus];
   cur.classList.add("focused");
   cur.scrollIntoView({ block: "center", behavior: "smooth" });
 }
 
 function detailMove(dRow, dCol) {
+  if (detailZone === "toggle") {
+    // LEFT/RIGHT pick the track directly; DOWN drops into the episode grid.
+    if (dCol < 0) audioPref = "sub";
+    else if (dCol > 0) audioPref = "dub";
+    else if (dRow > 0) detailZone = "episodes";
+    updateDetailFocus(false);
+    return;
+  }
+
   const n = els.episodes.children.length;
   if (!n) return;
+  // UP from the top row jumps to the Sub/Dub toggle.
+  if (dRow < 0 && epFocus < epCols) {
+    detailZone = "toggle";
+    updateDetailFocus(false);
+    return;
+  }
   if (dCol) epFocus = clamp(epFocus + dCol, n - 1);
   if (dRow) epFocus = clamp(epFocus + dRow * epCols, n - 1);
-  applyEpisodeFocus(false);
+  updateDetailFocus(false);
 }
 
 function detailSelect() {
+  if (detailZone === "toggle") {
+    audioPref = audioPref === "sub" ? "dub" : "sub"; // OK flips the pill
+    updateDetailFocus(false);
+    return;
+  }
   const cur = els.episodes.children[epFocus];
   if (!cur) return;
   const episode = parseInt(cur.dataset.episode, 10);
@@ -571,13 +603,13 @@ function restoreHome() {
 function playEpisode(media, episode) {
   const title = titleOf(media);
   screen = "playing";
-  showOverlay(`Loading ${title} — Episode ${episode}…`);
+  showOverlay(`Loading ${title} — Episode ${episode} (${audioPref.toUpperCase()})…`);
 
   fetch(PLAY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // The backend scraper resolves "<title> episode N" to a real stream URL.
-    body: JSON.stringify({ id: media.id, title, episode, query: `${title} episode ${episode}` }),
+    // The backend scraper resolves the title + episode to a real stream URL.
+    body: JSON.stringify({ id: media.id, title, episode, audio: audioPref }),
   })
     .then(async (res) => {
       const data = await res.json().catch(() => ({}));

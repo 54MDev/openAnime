@@ -61,37 +61,47 @@ class ScrapeError(Exception):
 
 
 class Stream:
-    """A resolved, playable stream: direct URL + the headers needed to fetch it."""
+    """A resolved, playable stream: direct URL + the headers needed to fetch it.
 
-    __slots__ = ("url", "headers", "page")
+    `subtitle` is an optional external subtitle URL (the English .vtt for sub
+    playback); it's fetched with the same headers as the video.
+    """
 
-    def __init__(self, url, headers, page):
+    __slots__ = ("url", "headers", "page", "subtitle")
+
+    def __init__(self, url, headers, page, subtitle=None):
         self.url = url
         self.headers = headers or {}
         self.page = page
+        self.subtitle = subtitle
 
     def __repr__(self):
-        return f"Stream(url={self.url!r}, page={self.page!r}, headers={self.headers!r})"
+        return (f"Stream(url={self.url!r}, page={self.page!r}, "
+                f"subtitle={self.subtitle!r}, headers={self.headers!r})")
 
 
 def _is_url(s):
     return isinstance(s, str) and (s.startswith("http://") or s.startswith("https://"))
 
 
-def get_stream_url(target=None, *, title=None, episode=1):
+def get_stream_url(target=None, *, title=None, episode=1, audio="sub"):
     """Resolve a target to a Stream. Raises ScrapeError if nothing resolves.
 
     `target` may be a watch-page URL (anything the plugins recognize) or, when
     omitted, `title` is searched across providers. `episode` selects the entry.
+    `audio` is "sub" (Japanese audio + English subtitles) or "dub" (English
+    audio, no subtitles).
     """
     try:
         episode = int(episode)
     except (TypeError, ValueError):
         episode = 1
+    if audio not in ("sub", "dub"):
+        audio = "sub"
 
     # Direct URL: hand straight to yt-dlp (skips the search step).
     if _is_url(target):
-        stream = _ytdlp_extract(target, episode)
+        stream = _ytdlp_extract(target, episode, audio)
         if stream:
             return stream
         raise ScrapeError(f"yt-dlp could not extract a stream from {target}")
@@ -111,7 +121,7 @@ def get_stream_url(target=None, *, title=None, episode=1):
         if not page:
             errors.append(f"{name}: no match for {title!r}")
             continue
-        stream = _ytdlp_extract(page, episode)
+        stream = _ytdlp_extract(page, episode, audio)
         if stream:
             return stream
         errors.append(f"{name}: yt-dlp could not extract ep {episode} from {page}")
@@ -119,16 +129,43 @@ def get_stream_url(target=None, *, title=None, episode=1):
     raise ScrapeError("all providers failed -> " + "; ".join(errors))
 
 
-def _ytdlp_extract(page_url, episode):
+def _format_for(audio):
+    """yt-dlp format string preferring the sub/dub variant, falling back to any.
+
+    anikoto tags formats by id prefix (sub-* / dub-*); pick the requested track
+    at <=1080p, then any of that track, then anything at all.
+    """
+    return (f"best[height<=1080][format_id^={audio}]"
+            f"/best[format_id^={audio}]/{YTDLP_FORMAT}")
+
+
+def _pick_subtitle(info, video_url):
+    """Choose the English subtitle URL, preferring one on the video's own host."""
+    tracks = (info.get("subtitles") or {}).get("en") or []
+    urls = [t.get("url") for t in tracks if t.get("url")]
+    if not urls:
+        return None
+    try:
+        host = urllib.parse.urlsplit(video_url).netloc
+        for u in urls:
+            if urllib.parse.urlsplit(u).netloc == host:
+                return u
+    except ValueError:
+        pass
+    return urls[0]
+
+
+def _ytdlp_extract(page_url, episode, audio):
     """Run yt-dlp on a watch page; return a Stream for the given episode or None.
 
     Uses `-j --playlist-items N` so only episode N is extracted (one JSON line),
     and reads `http_headers` so the referer-gated stream stays playable in mpv.
+    For sub playback, also picks the English subtitle track.
     """
     cmd = [
         YTDLP, "--plugin-dirs", PLUGIN_DIR,
         "--no-warnings", "--ignore-no-formats-error",
-        "-f", YTDLP_FORMAT,
+        "-f", _format_for(audio),
         "--playlist-items", str(episode),
         "-j", page_url,
     ]
@@ -155,7 +192,10 @@ def _ytdlp_extract(page_url, episode):
             continue
         url = info.get("url")
         if url:
-            return Stream(url=url, headers=info.get("http_headers"), page=page_url)
+            # Only attach subtitles for sub playback (dub is English audio).
+            subtitle = _pick_subtitle(info, url) if audio == "sub" else None
+            return Stream(url=url, headers=info.get("http_headers"),
+                         page=page_url, subtitle=subtitle)
     return None
 
 
@@ -225,18 +265,22 @@ def main(argv=None):
     parser.add_argument("target", nargs="?", help="a watch-page URL, or a title")
     parser.add_argument("--title", help="anime title to search for")
     parser.add_argument("--episode", type=int, default=1, help="episode number (default 1)")
+    parser.add_argument("--audio", choices=("sub", "dub"), default="sub",
+                        help="sub (subtitled) or dub (default: sub)")
     args = parser.parse_args(argv)
 
     if not args.target and not args.title:
         parser.error("give a URL/title positionally or use --title")
 
     try:
-        stream = get_stream_url(args.target, title=args.title, episode=args.episode)
+        stream = get_stream_url(args.target, title=args.title,
+                                episode=args.episode, audio=args.audio)
     except ScrapeError as e:
         print(f"FAILED: {e}", file=sys.stderr)
         return 1
-    print(f"source:  {stream.page}", file=sys.stderr)
-    print(f"headers: {json.dumps(stream.headers)}", file=sys.stderr)
+    print(f"source:   {stream.page}", file=sys.stderr)
+    print(f"subtitle: {stream.subtitle}", file=sys.stderr)
+    print(f"headers:  {json.dumps(stream.headers)}", file=sys.stderr)
     print(stream.url)
     return 0
 
