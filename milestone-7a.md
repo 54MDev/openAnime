@@ -188,7 +188,7 @@ crash mid-write can't corrupt the store.
 - [x] Frontend: fetch `/progress` on boot + after playback; send richer `/play` body
 - [x] Frontend: progress bar under each episode tile; CSS
 - [x] Dev-machine test with a local file (point scraper/`url` at a seekable file): play partway, BACK, confirm `progress.json` updates; reopen detail → bar shows; replay → resumes near the saved spot; play to >90% → marked completed (full bar)
-- [ ] On-hardware test via remote: watch part of an episode, exit, confirm the bar and resume behave
+- [x] On-hardware test via remote: watch part of an episode, exit, confirm the bar and resume behave
 
 **Done when:** Playing any episode records its position; the detail screen draws
 a progress bar at the bottom of each watched episode tile (full/"watched" once

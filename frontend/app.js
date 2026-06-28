@@ -96,6 +96,8 @@ const MEDIA_FIELDS = `
   bannerImage
   description(asHtml: false)
   episodes
+  status
+  nextAiringEpisode { episode }
   averageScore
   genres
 `;
@@ -183,9 +185,22 @@ function mediaSnapshot(media) {
     bannerImage: media.bannerImage,
     description: media.description,
     episodes: media.episodes,
+    status: media.status,
+    nextAiringEpisode: media.nextAiringEpisode,
     averageScore: media.averageScore,
     genres: media.genres,
   };
+}
+
+// How many episodes are actually available to watch right now (M7C).
+//   - FINISHED show: AniList `episodes` is the real, final total.
+//   - RELEASING show: `episodes` is null; aired so far = next airing ep - 1.
+//   - Otherwise unknown: 0 (caller falls back to a single Play entry).
+function airedEpisodeCount(media) {
+  if (media.episodes && media.episodes > 0) return media.episodes;
+  const next = media.nextAiringEpisode?.episode;
+  if (next && next > 1) return next - 1;
+  return 0;
 }
 
 async function fetchProgress() {
@@ -216,6 +231,7 @@ function episodeBar(mediaId, num) {
 function applyEpisodeProgress() {
   if (!detailMedia) return;
   for (const el of els.episodes.children) {
+    if (el.dataset.episode === undefined) continue; // skip range/back tiles (M7C)
     const num = parseInt(el.dataset.episode, 10);
     el.querySelector(".ep-progress")?.remove();
     const bar = episodeBar(detailMedia.id, num);
@@ -437,6 +453,16 @@ let epCols = 1; // columns per row in the episode grid, for d-pad math
 let audioPref = "sub"; // "sub" | "dub" — sticky across shows
 let detailZone = "episodes"; // "toggle" (sub/dub pills) | "episodes"
 
+// M7C: episode-list view state for the current show.
+//   detailChunks  — list of {label, nums[]} when the show is too long for a flat
+//                   grid (>CHUNK_SIZE), else null. nums[] is in display order.
+//   detailView    — "chunks" (drilling into ranges) | "episodes" (a flat list).
+// Long airing shows (One Piece) get grouped into hundred-episode ranges so the
+// D-pad isn't dragged through a 1000-long scroll.
+const CHUNK_SIZE = 100;
+let detailChunks = null;
+let detailView = "episodes";
+
 function openDetail(media) {
   detailMedia = media;
 
@@ -454,17 +480,28 @@ function openDetail(media) {
     ? `#0a0c14 url("${art}") center/cover no-repeat`
     : `linear-gradient(135deg, ${media.coverImage?.color || "#2a2f55"}, #0a0c14)`;
 
-  // Build episode entries: 1..N, or a single "Play" entry when count is unknown.
-  els.episodes.innerHTML = "";
-  const n = media.episodes;
-  if (n && n > 0) {
-    for (let i = 1; i <= n; i++) {
-      els.episodes.append(makeEpisode(`Episode ${i}`, i));
-    }
-    els.episodes.classList.remove("single");
+  // Build the episode list. Count is the real total for finished shows and the
+  // aired-so-far count for currently-releasing ones (M7C).
+  const count = airedEpisodeCount(media);
+  const airing = media.status === "RELEASING";
+
+  if (count <= 0) {
+    // Truly unknown episode count: keep the single generic Play entry.
+    detailChunks = null;
+    renderEpisodeList([1], { single: true });
   } else {
-    els.episodes.append(makeEpisode("Play", 1));
-    els.episodes.classList.add("single");
+    // Episode numbers in display order. Airing shows list newest-first so the
+    // just-aired episode is front-and-centre; finished shows stay ascending.
+    const nums = Array.from({ length: count }, (_, i) => i + 1);
+    if (airing) nums.reverse();
+
+    if (count > CHUNK_SIZE) {
+      detailChunks = buildChunks(nums);
+      renderChunkList();
+    } else {
+      detailChunks = null;
+      renderEpisodeList(nums);
+    }
   }
 
   epFocus = 0;
@@ -475,6 +512,57 @@ function openDetail(media) {
   crossFade(els.home, els.detail);
   screen = "detail";
   updateDetailFocus(true);
+}
+
+// Split an ordered list of episode numbers into hundred-sized ranges, labelled
+// by their actual first/last episode (e.g. "1101 – 1200"). nums is already in
+// display order, so chunks inherit that order (newest-first for airing shows).
+function buildChunks(nums) {
+  const chunks = [];
+  for (let i = 0; i < nums.length; i += CHUNK_SIZE) {
+    const slice = nums.slice(i, i + CHUNK_SIZE);
+    const lo = Math.min(slice[0], slice[slice.length - 1]);
+    const hi = Math.max(slice[0], slice[slice.length - 1]);
+    chunks.push({ label: `${lo} – ${hi}`, nums: slice });
+  }
+  return chunks;
+}
+
+// Render the top-level range picker for a long show. Selecting a range drills
+// into its episodes (renderEpisodeList); the existing d-pad grid nav is reused
+// because chunk tiles are the same .episode buttons.
+function renderChunkList() {
+  els.episodes.innerHTML = "";
+  els.episodes.classList.remove("single");
+  detailView = "chunks";
+  detailChunks.forEach((chunk, i) => {
+    const el = document.createElement("button");
+    el.className = "episode chunk";
+    el.textContent = chunk.label;
+    el.dataset.chunk = i;
+    els.episodes.append(el);
+  });
+  epFocus = 0;
+}
+
+// Render a flat list of episodes. When the show is chunked, a "← Ranges" entry
+// leads back to the picker. opts.single keeps the lone generic Play styling.
+function renderEpisodeList(nums, opts = {}) {
+  els.episodes.innerHTML = "";
+  els.episodes.classList.toggle("single", !!opts.single);
+  detailView = "episodes";
+  if (detailChunks) {
+    const back = document.createElement("button");
+    back.className = "episode chunk back";
+    back.textContent = "← Ranges";
+    back.dataset.back = "1";
+    els.episodes.append(back);
+  }
+  for (const num of nums) {
+    const label = opts.single ? "Play" : `Episode ${num}`;
+    els.episodes.append(makeEpisode(label, num));
+  }
+  epFocus = 0;
 }
 
 function makeEpisode(label, num) {
@@ -561,8 +649,30 @@ function detailSelect() {
   }
   const cur = els.episodes.children[epFocus];
   if (!cur) return;
+  // M7C: range picker / back navigation for long chunked shows.
+  if (cur.dataset.back) {
+    renderChunkList();
+    updateDetailFocus(true);
+    return;
+  }
+  if (cur.dataset.chunk !== undefined) {
+    renderEpisodeList(detailChunks[+cur.dataset.chunk].nums);
+    updateDetailFocus(true);
+    return;
+  }
   const episode = parseInt(cur.dataset.episode, 10);
   playEpisode(detailMedia, episode);
+}
+
+// BACK inside the detail screen: if we've drilled into a range of a chunked
+// show, step back up to the range picker; otherwise leave the show (M7C).
+function detailBack() {
+  if (detailChunks && detailView === "episodes") {
+    renderChunkList();
+    updateDetailFocus(true);
+    return;
+  }
+  closeDetail();
 }
 
 function closeDetail() {
@@ -844,7 +954,7 @@ function handleCommand(cmd) {
       else if (cmd === "LEFT")  detailMove(0, -1);
       else if (cmd === "RIGHT") detailMove(0, 1);
       else if (cmd === "OK")    detailSelect();
-      else if (cmd === "BACK")  closeDetail();
+      else if (cmd === "BACK")  detailBack();
       break;
 
     case "keyboard":
