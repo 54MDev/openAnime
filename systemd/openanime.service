@@ -1,0 +1,21 @@
+[Unit]
+Description=openAnime backend bridge (IR router -> WebSocket + HTTP UI)
+# Wait for the arduino-router socket owner and the network before starting.
+After=network-online.target arduino-router.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=user
+WorkingDirectory=/home/user/openAnime
+ExecStart=/usr/bin/python3 /home/user/openAnime/backend/app.py
+# Streaming sites need outbound DNS/HTTPS; nothing here listens before the
+# socket exists, and router_reader() already retries if the socket is late.
+Restart=on-failure
+RestartSec=3
+# Surface backend logs via journalctl -u openanime.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

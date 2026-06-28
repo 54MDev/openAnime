@@ -1,0 +1,30 @@
+# openAnime Openbox autostart -- install to ~/.config/openbox/autostart
+#
+# Runs once when Openbox starts (after LightDM autologin). It hides the cursor,
+# stops the screen from blanking, then launches Chromium in kiosk mode pointed
+# at the local backend. The backend itself is started separately by the
+# openanime systemd service, so this file only owns the display side.
+
+# Hide the mouse cursor immediately and keep it hidden (no mouse on an appliance).
+unclutter -idle 0 &
+
+# Disable screen blanking / DPMS so the TV never sleeps mid-browse.
+xset s off
+xset -dpms
+xset s noblank
+
+# Give the systemd backend a moment to bind :8080 before Chromium loads it.
+# Bump this to 8 if you ever see Chromium open on an error page at cold boot.
+sleep 3
+
+chromium --kiosk \
+  --disable-extensions \
+  --disable-plugins \
+  --disable-translate \
+  --disable-sync \
+  --disable-background-networking \
+  --disable-default-apps \
+  --process-per-site \
+  --no-first-run \
+  --check-for-update-interval=31536000 \
+  http://localhost:8080 &
