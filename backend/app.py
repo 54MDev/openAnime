@@ -23,6 +23,7 @@ import asyncio
 import http.server
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -53,6 +54,10 @@ MPV_BIN = os.environ.get("OPENANIME_MPV", "mpv")
 AUDIO_DEVICE = os.environ.get("OPENANIME_AUDIO_DEVICE")
 # wmctrl matches window title substrings; Chromium's title ends in "Chromium".
 BROWSER_WINDOW = os.environ.get("OPENANIME_BROWSER", "Chromium")
+# mpv's JSON IPC socket: the control handlers (/pause, /seek) write commands here
+# while playback is live. mpv creates it on launch via --input-ipc-server.
+MPV_IPC_SOCKET = os.environ.get("OPENANIME_MPV_IPC", "/tmp/openanime-mpv.sock")
+SEEK_STEP = int(os.environ.get("OPENANIME_SEEK_STEP", "10"))
 
 # MessagePack-RPC message type codes
 REQUEST, RESPONSE, NOTIFICATION = 0, 1, 2
@@ -116,6 +121,7 @@ def play_blocking(stream, title, episode):
     """
     global _mpv_proc
     cmd = [MPV_BIN, "--fullscreen", "--ontop", "--no-terminal", "--really-quiet",
+           f"--input-ipc-server={MPV_IPC_SOCKET}",
            f"--force-media-title={title} — Episode {episode}"]
     if AUDIO_DEVICE:
         cmd.append(f"--audio-device={AUDIO_DEVICE}")
@@ -164,6 +170,44 @@ def stop_playback():
     return False
 
 
+def _mpv_ipc(command):
+    """Write one newline-terminated JSON command to mpv's IPC socket.
+
+    Returns True if it was sent. No-op (False) when nothing is playing. The
+    write is independent of the mpv lifecycle (_play_lock), but liveness is
+    checked under the lock to avoid racing with play/stop.
+    """
+    with _play_lock:
+        live = _mpv_proc is not None and _mpv_proc.poll() is None
+    if not live:
+        return False
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(2)
+            sock.connect(MPV_IPC_SOCKET)
+            sock.sendall((json.dumps({"command": command}) + "\n").encode())
+        return True
+    except OSError as e:
+        print(f"[play] mpv IPC failed: {e}", file=sys.stderr)
+        return False
+
+
+def toggle_pause():
+    """Flip pause/play and flash mpv's OSD progress bar."""
+    if not _mpv_ipc(["cycle", "pause"]):
+        return False
+    _mpv_ipc(["show-progress"])
+    return True
+
+
+def seek_relative(delta):
+    """Seek `delta` seconds (signed, relative) and flash the progress bar."""
+    if not _mpv_ipc(["seek", delta]):
+        return False
+    _mpv_ipc(["show-progress"])
+    return True
+
+
 class FrontendHandler(http.server.SimpleHTTPRequestHandler):
     """Serves the frontend/ directory and handles the placeholder /play POST.
 
@@ -182,8 +226,29 @@ class FrontendHandler(http.server.SimpleHTTPRequestHandler):
         elif path == "/stop":
             stopped = stop_playback()
             self._json(200, {"status": "stopping" if stopped else "idle"})
+        elif path == "/pause":
+            toggled = toggle_pause()
+            self._json(200, {"status": "toggled" if toggled else "idle"})
+        elif path == "/seek":
+            self._handle_seek()
         else:
             self._json(404, {"error": "not found"})
+
+    def _handle_seek(self):
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b""
+        try:
+            payload = json.loads(raw or b"{}")
+        except json.JSONDecodeError:
+            self._json(400, {"status": "error", "error": "invalid JSON"})
+            return
+        try:
+            delta = float(payload.get("delta", SEEK_STEP))
+        except (TypeError, ValueError):
+            self._json(400, {"status": "error", "error": "invalid delta"})
+            return
+        seeking = seek_relative(delta)
+        self._json(200, {"status": "seeking" if seeking else "idle"})
 
     def _handle_play(self):
         length = int(self.headers.get("Content-Length", 0))
