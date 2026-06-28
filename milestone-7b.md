@@ -118,7 +118,7 @@ how far along each show is.
 - [x] Verify card selection opens the normal detail screen via the stored snapshot
 - [x] (Optional) distinguishing badge / mini progress bar on continue cards
 - [x] Dev-machine test: watch part of show A and show B, return home → both appear, most-recent first; finish show A's episode past the threshold → it leaves the row (if no other in-progress episodes)
-- [ ] On-hardware test via remote: partial-watch a show, exit, confirm it's the first home row and reopening it lands on the episode list
+- [x] On-hardware test via remote: partial-watch a show, exit, confirm it's the first home row and reopening it lands on the episode list
 
 **Done when:** After watching part of any episode, the show appears as the first
 card in a "Continue Watching" row on the home screen; selecting it opens that

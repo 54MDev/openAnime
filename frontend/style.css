@@ -365,6 +365,17 @@ body {
   flex-basis: 22vw;
   background: linear-gradient(135deg, var(--accent), #3a5fd0);
 }
+/* Range picker / back tiles for long chunked shows (M7C): read as navigation,
+   not playable episodes. */
+.episode.chunk {
+  background: var(--bg);
+  border-color: rgba(255, 255, 255, .12);
+  font-size: 1.5vw;
+}
+.episode.chunk.focused {
+  background: #1b2236;
+  border-color: var(--focus);
+}
 .episode.focused {
   transform: scale(1.08);
   border-color: var(--focus);

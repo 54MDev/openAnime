@@ -124,7 +124,7 @@ cleanly — all from the remote, no keyboard. All six milestones done.
 
 ---
 
-## Milestone 7A — Episode Progress Tracking
+## Milestone 7A — Episode Progress Tracking ✅ COMPLETE (verified on hardware)
 **Goal:** Every episode play records how far you got; the detail screen shows a
 progress bar under each episode tile, and replaying resumes where you stopped.
 
@@ -134,13 +134,13 @@ store, and exposes `GET /progress`. Frontend draws a bar on each episode tile.
 
 **Full spec:** [milestone-7a.md](milestone-7a.md).
 
-**Status:** Built + dev-verified (real mpv on local clips: partial-watch
-persistence, completion threshold, and resume floor/mid/completed cases all
-pass). On-hardware remote test pending.
+**Status:** ✅ COMPLETE. Dev-verified (real mpv on local clips: partial-watch
+persistence, completion threshold, resume floor/mid/completed cases) and
+verified on hardware via the remote.
 
 ---
 
-## Milestone 7B — Continue Watching Row
+## Milestone 7B — Continue Watching Row ✅ COMPLETE (verified on hardware)
 **Goal:** The home screen shows a "Continue Watching" row first, listing series
 with an unfinished episode (most-recent first); selecting one opens its normal
 episode list — no re-searching.
@@ -151,8 +151,8 @@ catalog. Almost entirely frontend.
 
 **Full spec:** [milestone-7b.md](milestone-7b.md).
 
-**Status:** Built; grouping/filter logic dev-verified against the progress store.
-On-hardware remote test (browse → continue card → episode list) pending.
+**Status:** ✅ COMPLETE. Grouping/filter logic dev-verified against the progress
+store, and verified on hardware (browse → continue card → episode list).
 
 ---
 
