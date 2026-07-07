@@ -28,6 +28,15 @@ See [tech-stack.md](tech-stack.md) for the full hardware/software breakdown and 
 
 ---
 
+## Gallery
+
+images/IMG_8354.jpeg
+images/IMG_8391.jpeg
+images/IMG_8393.jpeg
+images/IMG_8395.jpeg
+
+---
+
 ## My environment
 
 | Component | Details |
