@@ -30,10 +30,10 @@ See [tech-stack.md](tech-stack.md) for the full hardware/software breakdown and 
 
 ## Gallery
 
-images/IMG_8354.jpeg
-images/IMG_8391.jpeg
-images/IMG_8393.jpeg
-images/IMG_8395.jpeg
+![openAnime build photo 1](images/IMG_8354.jpeg)
+![openAnime build photo 2](images/IMG_8391.jpeg)
+![openAnime build photo 3](images/IMG_8393.jpeg)
+![openAnime build photo 4](images/IMG_8395.jpeg)
 
 ---
 
