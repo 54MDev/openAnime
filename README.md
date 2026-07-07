@@ -30,10 +30,7 @@ See [tech-stack.md](tech-stack.md) for the full hardware/software breakdown and 
 
 ## Gallery
 
-![openAnime build photo 1](images/IMG_8354.jpeg)
-![openAnime build photo 2](images/IMG_8391.jpeg)
-![openAnime build photo 3](images/IMG_8393.jpeg)
-![openAnime build photo 4](images/IMG_8395.jpeg)
+<img src="images/IMG_8354.jpeg" width="24%" alt="openAnime build photo 1"> <img src="images/IMG_8391.jpeg" width="24%" alt="openAnime build photo 2"> <img src="images/IMG_8393.jpeg" width="24%" alt="openAnime build photo 3"> <img src="images/IMG_8395.jpeg" width="24%" alt="openAnime build photo 4">
 
 ---
 
