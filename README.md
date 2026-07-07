@@ -101,3 +101,6 @@ roadmap.md          Milestone-by-milestone build plan and status
 - Streaming extraction depends on `yt-dlp` and a vendored patched plugin for anikoto.cz; both need periodic updates as the site changes (see `backend/plugins/yt-dlp-anikoto/PATCHES.md`).
 
 See the troubleshooting table in [build-instructions.md](build-instructions.md) for more.
+
+## Future Development
+I'm CADing a box/container for this project and will be pushed soon. you'll see it later.
